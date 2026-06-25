@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>formfillm</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="ff-header">
+      <div class="ff-title-row">
+        <h1 class="ff-app-title">formfillm</h1>
+        <span class="ff-tagline">local disclosure assistant</span>
+      </div>
+      <div id="status" class="ff-status" aria-label="Local status"></div>
+    </header>
+
+    <nav class="ff-nav" role="tablist" aria-label="formfillm sections">
+      <button class="ff-nav-btn ff-nav-active" data-view="scan" role="tab" aria-selected="true" type="button">
+        Scan this page
+      </button>
+      <button class="ff-nav-btn" data-view="profile" role="tab" aria-selected="false" type="button">
+        Review profile
+      </button>
+      <button class="ff-nav-btn" data-view="ledger" role="tab" aria-selected="false" type="button">
+        Disclosure ledger
+      </button>
+      <button class="ff-nav-btn" data-view="settings" role="tab" aria-selected="false" type="button">
+        Settings
+      </button>
+    </nav>
+
+    <main id="view" class="ff-view" role="tabpanel" aria-live="polite"></main>
+
+    <div id="flash" class="ff-flash" role="status" aria-live="polite"></div>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

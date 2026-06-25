@@ -1,0 +1,465 @@
+/* formfillm side panel — local-only, no remote fonts or assets. */
+
+:root {
+  --bg: #0f1417;
+  --panel: #161d22;
+  --card: #1b242b;
+  --text: #e6edf0;
+  --muted: #93a1aa;
+  --teal: #0d6e71;
+  --teal-bright: #14a3a7;
+  --accent: #2563eb;
+  --ok: #34d399;
+  --err: #f87171;
+  --warn: #fbbf24;
+  --low: #34d399;
+  --medium: #60a5fa;
+  --high: #fbbf24;
+  --secret: #f87171;
+  --unknown: #9ca3af;
+  --border: #2a363e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ff-header {
+  padding: 12px 14px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.ff-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ff-app-title {
+  margin: 0;
+  font-size: 18px;
+  color: var(--teal-bright);
+  letter-spacing: 0.3px;
+}
+
+.ff-tagline {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ff-status {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ff-status-key {
+  color: var(--muted);
+}
+
+.ff-ok {
+  color: var(--ok);
+}
+.ff-err {
+  color: var(--err);
+}
+
+.ff-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #0b0f12;
+}
+.ff-badge-local {
+  background: var(--teal-bright);
+}
+.ff-badge-low {
+  background: var(--low);
+}
+.ff-badge-medium {
+  background: var(--medium);
+}
+.ff-badge-high {
+  background: var(--high);
+}
+.ff-badge-secret {
+  background: var(--secret);
+}
+.ff-badge-unknown {
+  background: var(--unknown);
+}
+
+.ff-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.ff-nav-btn {
+  flex: 1 1 auto;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ff-nav-btn:hover {
+  color: var(--text);
+}
+.ff-nav-active {
+  background: var(--card);
+  color: var(--teal-bright);
+  border-color: var(--border);
+}
+.ff-nav-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ff-view {
+  padding: 12px 14px 60px;
+}
+
+.ff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.ff-btn {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ff-btn:hover {
+  border-color: var(--teal);
+}
+.ff-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ff-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ff-btn-primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #eafaf8;
+  font-weight: 600;
+}
+.ff-btn-primary:hover {
+  background: var(--teal-bright);
+}
+.ff-btn-sm {
+  padding: 5px 9px;
+  font-size: 12px;
+}
+.ff-btn-on {
+  outline: 2px solid var(--teal-bright);
+}
+.ff-btn-danger {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.ff-guidance {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--teal-bright);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text);
+  margin: 8px 0;
+}
+
+.ff-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+.ff-muted {
+  color: var(--muted);
+}
+
+.ff-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ff-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.ff-card[data-decision="approved"],
+.ff-card[data-decision="edited"] {
+  border-color: var(--ok);
+}
+.ff-card[data-decision="skipped"],
+.ff-card[data-decision="marked_wrong"] {
+  opacity: 0.75;
+}
+.ff-card:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.ff-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ff-card-label {
+  font-weight: 600;
+}
+.ff-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 6px;
+}
+.ff-card-reason {
+  margin: 4px 0;
+}
+.ff-card-purpose,
+.ff-card-action {
+  margin: 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.ff-card-warning {
+  margin: 4px 0;
+  color: var(--warn);
+  font-size: 12px;
+}
+.ff-card-neverfill {
+  margin: 6px 0;
+  color: var(--secret);
+  font-weight: 600;
+}
+.ff-card-value {
+  margin: 6px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.ff-card-decision {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--teal-bright);
+}
+.ff-card-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ff-edit {
+  background: var(--panel);
+  border: 1px solid var(--teal);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+.ff-edit-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.ff-edit-input,
+.ff-input {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+.ff-input:focus,
+.ff-edit-input:focus {
+  outline: 2px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.ff-preview {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+.ff-preview-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+/* Profile */
+.ff-profile-form,
+.ff-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+.ff-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ff-field-key {
+  flex: 0 0 150px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ff-input-key {
+  flex: 0 0 150px;
+}
+.ff-warning-box {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--warn);
+  font-size: 12px;
+}
+
+/* Ledger */
+.ff-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ff-ledger-row {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ff-ledger-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.ff-ledger-label {
+  font-weight: 600;
+}
+.ff-ledger-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 2px 0;
+}
+.ff-ledger-sub {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Settings */
+.ff-set-field {
+  margin: 10px 0;
+}
+.ff-set-label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.ff-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.ff-cmd {
+  background: #0b0f12;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--teal-bright);
+  user-select: all;
+}
+.ff-models-ref {
+  margin: 12px 0;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.ff-model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ff-test-result {
+  margin: 8px 0;
+}
+
+h2 {
+  font-size: 16px;
+  margin: 4px 0 8px;
+}
+h3 {
+  font-size: 13px;
+  margin: 10px 0 4px;
+  color: var(--muted);
+}
+
+.ff-flash {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--teal);
+  color: #eafaf8;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.ff-flash-show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

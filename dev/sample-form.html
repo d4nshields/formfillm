@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>formfillm sample form</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+      h1 { font-size: 1.4rem; }
+      fieldset { margin: 1rem 0; border: 1px solid #ccc; border-radius: 8px; padding: 1rem; }
+      legend { font-weight: 600; padding: 0 6px; }
+      label { display: block; margin: 0.6rem 0 0.2rem; font-weight: 500; }
+      input, select, textarea { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+      .row { margin-bottom: 0.5rem; }
+      .hint { color: #666; font-size: 0.85rem; }
+      button { margin-top: 1rem; padding: 0.6rem 1rem; font-size: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>formfillm sample form</h1>
+    <p class="hint">
+      A local test page exercising a mix of field types and sensitivities. Open the formfillm side panel,
+      click “Scan this page”, review the classifications, and confirm that only approved fields are filled —
+      and that secret fields are never filled.
+    </p>
+
+    <form id="sample" autocomplete="on">
+      <fieldset>
+        <legend>Contact</legend>
+        <label for="fullname">Full name</label>
+        <input id="fullname" name="fullname" type="text" autocomplete="name" required />
+
+        <label for="email">Email address</label>
+        <input id="email" name="email" type="email" autocomplete="email" required />
+
+        <label for="phone">Phone (optional)</label>
+        <input id="phone" name="phone" type="tel" autocomplete="tel" />
+      </fieldset>
+
+      <fieldset>
+        <legend>Shipping address</legend>
+        <label for="street">Street address</label>
+        <input id="street" name="street" type="text" autocomplete="address-line1" />
+
+        <label for="unit">Apartment / unit</label>
+        <input id="unit" name="unit" type="text" autocomplete="address-line2" />
+
+        <label for="city">City</label>
+        <input id="city" name="city" type="text" autocomplete="address-level2" />
+
+        <label for="region">Province / region</label>
+        <input id="region" name="region" type="text" autocomplete="address-level1" />
+
+        <label for="postal">Postal code</label>
+        <input id="postal" name="postal" type="text" autocomplete="postal-code" />
+
+        <label for="country">Country</label>
+        <select id="country" name="country" autocomplete="country-name">
+          <option value="">Select…</option>
+          <option value="Canada">Canada</option>
+          <option value="United States">United States</option>
+          <option value="United Kingdom">United Kingdom</option>
+        </select>
+      </fieldset>
+
+      <fieldset>
+        <legend>Preferences</legend>
+        <label for="language">Preferred language</label>
+        <select id="language" name="language">
+          <option value="">Select…</option>
+          <option value="English">English</option>
+          <option value="French">French</option>
+          <option value="Spanish">Spanish</option>
+        </select>
+
+        <div class="row">
+          <label><input type="checkbox" id="newsletter" name="newsletter" /> Subscribe to the newsletter</label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Sensitive (should require explicit consent or never fill)</legend>
+        <label for="birthdate">Date of birth</label>
+        <input id="birthdate" name="birthdate" type="date" autocomplete="bday" />
+
+        <label for="sin">Social Insurance Number (SIN/SSN)</label>
+        <input id="sin" name="sin" type="text" inputmode="numeric" placeholder="000-000-000" />
+        <p class="hint">formfillm must classify this as secret and never fill it.</p>
+
+        <label for="password">Account password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" />
+        <p class="hint">formfillm must never fill password fields.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Comments</legend>
+        <label for="comments">Anything else?</label>
+        <textarea id="comments" name="comments" rows="3"></textarea>
+      </fieldset>
+
+      <button type="submit">Submit (formfillm never clicks this for you)</button>
+    </form>
+
+    <script>
+      // Prevent accidental navigation during manual testing.
+      document.getElementById("sample").addEventListener("submit", function (e) {
+        e.preventDefault();
+        alert("Submit intercepted by the sample page. formfillm never submits forms.");
+      });
+    </script>
+  </body>
+</html>
