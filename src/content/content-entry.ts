@@ -56,8 +56,13 @@ function init(): void {
 
       case MSG.ApplyFill: {
         const refs = g.__formfillmRefs ?? new Map<string, FieldRef>();
+        console.log("[formfillm:content] ApplyFill received", {
+          requested: msg.fills.map((f) => f.fieldId),
+          knownRefs: refs.size,
+        });
         applyFills(refs, msg.fills)
           .then((results) => {
+            console.log("[formfillm:content] fill results", results);
             const filled = results.filter((r) => r.filled).length;
             setOverlayStatus(`Filled ${filled} of ${results.length} approved field${results.length === 1 ? "" : "s"}.`);
             const res: ApplyFillResponse = { ok: true, results };

@@ -347,12 +347,15 @@ async function highlight(fieldId: string | null): Promise<void> {
 
 async function doScan(): Promise<void> {
   guidanceText("Scanning…");
-  const tabId = await activeTabId();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  console.log("[formfillm:panel] active tab query →", { id: tab?.id, url: tab?.url, title: tab?.title });
+  const tabId = tab?.id ?? null;
   if (tabId === null) {
     guidanceText("Could not find the active tab.");
     return;
   }
   state.tabId = tabId;
+  console.log("[formfillm:panel] sending ScanPage for tabId", tabId);
 
   const scan = await sendBg<ScanPageResponse>({ type: MSG.ScanPage, tabId });
   if (!scan.ok || !scan.fields || !scan.page) {

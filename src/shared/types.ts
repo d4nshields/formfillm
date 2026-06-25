@@ -211,7 +211,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   ollamaBaseUrl: "http://127.0.0.1:11434",
-  model: "qwen3.5:9b",
+  // 4B fully fits an 8 GB GPU (e.g. RTX 4060); 9B spills ~28% to CPU and is slow.
+  model: "qwen3.5:4b",
   temperature: 0,
   localOnly: true,
   jsonSchemaMode: true,

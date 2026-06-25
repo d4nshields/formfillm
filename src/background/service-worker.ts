@@ -34,15 +34,68 @@ import { sanitizeFieldsForModel } from "../shared/sanitize.js";
 import { validateModelName, validateOllamaUrl } from "../shared/ollama-policy.js";
 import { DEFAULT_SETTINGS, STORAGE_KEYS, type Settings } from "../shared/types.js";
 
-const OLLAMA_TIMEOUT_MS = 60_000;
+// Cold model loads (especially when partly CPU-offloaded) can take a while,
+// so allow generous headroom before aborting.
+const OLLAMA_TIMEOUT_MS = 120_000;
+// Keep the model resident between calls to avoid repeated cold-load latency.
+const OLLAMA_KEEP_ALIVE = "30m";
+
+// Diagnostics. Logs appear in the SERVICE WORKER console:
+// chrome://extensions → formfillm → "Inspect views: service worker".
+const DEBUG = true;
+function log(...args: unknown[]): void {
+  if (DEBUG) console.log("[formfillm:bg]", ...args);
+}
+
+// Tabs for which the user invoked the formfillm action icon (which grants
+// activeTab). This is purely a diagnostic/UX signal — the real permission is
+// the activeTab grant held by Chrome. The grant is cleared on navigation.
+const activatedTabs = new Set<number>();
 
 // --- Side panel wiring ------------------------------------------------------
+//
+// We open the side panel from action.onClicked rather than via
+// setPanelBehavior({ openPanelOnActionClick: true }). The latter suppresses the
+// onClicked event, and onClicked is the gesture that grants `activeTab`. By
+// opening the panel here, clicking the toolbar icon both opens the panel AND
+// grants activeTab for that tab, so a later "Scan this page" can inject.
+//
+// IMPORTANT: openPanelOnActionClick is persisted in the user profile, so we
+// must explicitly set it false to undo any value left by a previous version —
+// otherwise Chrome opens the panel itself and never fires onClicked.
+async function configureSidePanel(): Promise<void> {
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+    log("openPanelOnActionClick set to false (onClicked will fire on icon click)");
+  } catch (e) {
+    log("setPanelBehavior failed", e);
+  }
+}
+chrome.runtime.onInstalled.addListener(() => void configureSidePanel());
+chrome.runtime.onStartup.addListener(() => void configureSidePanel());
+void configureSidePanel();
 
-chrome.runtime.onInstalled.addListener(() => {
-  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {
-    /* older Chrome without setPanelBehavior — side_panel.default_path still works */
-  });
+chrome.action.onClicked.addListener((tab) => {
+  log("action.onClicked fired", { tabId: tab.id, url: tab.url, windowId: tab.windowId });
+  if (tab.id !== undefined) {
+    activatedTabs.add(tab.id);
+    void chrome.sidePanel.open({ tabId: tab.id }).catch((e) => {
+      log("sidePanel.open({tabId}) failed; falling back to window", e);
+      if (tab.windowId !== undefined) void chrome.sidePanel.open({ windowId: tab.windowId });
+    });
+  } else if (tab.windowId !== undefined) {
+    void chrome.sidePanel.open({ windowId: tab.windowId });
+  }
 });
+
+// A full navigation revokes activeTab; track that so we can give a precise hint.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url && activatedTabs.has(tabId)) {
+    activatedTabs.delete(tabId);
+    log("tab navigated — activeTab grant cleared", { tabId, url: changeInfo.url });
+  }
+});
+chrome.tabs.onRemoved.addListener((tabId) => activatedTabs.delete(tabId));
 
 // --- Settings ---------------------------------------------------------------
 
@@ -90,6 +143,7 @@ async function ollamaChat(
         model: opts.model,
         stream: false,
         format,
+        keep_alive: OLLAMA_KEEP_ALIVE,
         options: { temperature: opts.temperature },
         messages: [
           { role: "system", content: system },
@@ -203,20 +257,44 @@ async function handleTestOllama(): Promise<TestOllamaResponse> {
 
 /** Inject the content script (idempotent) and ask it to scan the page. */
 async function handleScanPage(tabId: number): Promise<ScanPageResponse> {
+  const iconClicked = activatedTabs.has(tabId);
+  log("handleScanPage start", { tabId, iconClickedForThisTab: iconClicked });
+
+  // Inspect the tab so we can distinguish "restricted URL" from "no grant".
+  let tab: chrome.tabs.Tab | undefined;
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    tab = await chrome.tabs.get(tabId);
+    log("target tab", { url: tab.url, status: tab.status, title: tab.title });
   } catch (e) {
-    return {
-      ok: false,
-      error:
-        "Could not access this tab. Click the formfillm toolbar icon on the page you want to scan, then try again. " +
-        (e instanceof Error ? `(${e.message})` : ""),
-    };
+    log("chrome.tabs.get failed", e);
   }
+
+  const url = tab?.url ?? "";
+  if (/^(chrome|edge|brave|about|chrome-extension|moz-extension|view-source|devtools):/i.test(url) ||
+      /^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/i.test(url)) {
+    const msg = `formfillm cannot run on browser/system pages (${url || "restricted URL"}). Open a normal web page and try again.`;
+    log("blocked: restricted URL", url);
+    return { ok: false, error: msg };
+  }
+
+  try {
+    const injected = await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    log("executeScript ok", { frames: injected.length });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    log("executeScript FAILED", detail, { iconClickedForThisTab: iconClicked, url });
+    const hint = iconClicked
+      ? "You activated this tab via the icon, but injection was still denied — the page likely navigated/reloaded since (which revokes access). Reload the page, click the formfillm icon on it, then scan."
+      : "This tab was NOT opened via the formfillm action icon, so activeTab was never granted. Click the formfillm toolbar icon directly on this page (not Chrome's side-panel menu), then scan.";
+    return { ok: false, error: `Could not access this tab. ${hint} (${detail})` };
+  }
+
   try {
     const res = (await chrome.tabs.sendMessage(tabId, { type: MSG.ScanPage })) as ScanPageResponse;
+    log("scan response", { ok: res?.ok, fields: res?.fields?.length });
     return res ?? { ok: false, error: "No response from page scanner." };
   } catch (e) {
+    log("sendMessage(ScanPage) failed", e);
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
@@ -230,9 +308,11 @@ async function forwardToContent<T>(tabId: number, message: Message): Promise<T> 
 chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
   const msg = parseMessage(raw);
   if (!msg) {
+    log("received UNRECOGNIZED message", raw);
     sendResponse({ ok: false, error: "Unrecognized message." });
     return false;
   }
+  log("received message", msg.type, "tabId" in msg ? { tabId: msg.tabId } : "");
 
   switch (msg.type) {
     case MSG.Ping:

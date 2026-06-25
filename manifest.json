@@ -7,8 +7,7 @@
   "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
   "host_permissions": [
     "http://127.0.0.1:11434/*",
-    "http://localhost:11434/*",
-    "http://[::1]:11434/*"
+    "http://localhost:11434/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -31,6 +30,6 @@
     "128": "icons/icon128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:11434 http://localhost:11434 http://[::1]:11434; img-src 'self' data:; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:11434 http://localhost:11434; img-src 'self' data:; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
   }
 }

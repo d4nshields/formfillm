@@ -20,18 +20,19 @@ formfillm is a Manifest V3 Chrome extension that helps you fill web forms — bu
 
 Install Ollama from <https://ollama.com>, then pull the recommended model.
 
-The recommended model is pinned for reproducibility and chosen for an **NVIDIA RTX 4060 (8 GB VRAM)** development machine:
+The recommended model is pinned for reproducibility and chosen to **fully fit an NVIDIA RTX 4060 (8 GB VRAM)** development machine:
 
 ```bash
-ollama pull qwen3.5:9b
+ollama pull qwen3.5:4b
 ```
 
-Optional fallbacks (smaller / older), useful on lower-end hardware:
+Optional alternatives:
 
 ```bash
-ollama pull qwen3.5:4b      # fast fallback
-ollama pull qwen3.5:2b      # low-end fallback
+ollama pull qwen3.5:2b      # smaller / fastest, low-end fallback
 ollama pull qwen2.5:7b      # legacy fallback
+ollama pull qwen3.5:9b      # higher quality, but ~8.8 GB — partially CPU-offloaded
+                            # on an 8 GB GPU (slower); prefer a card with more VRAM
 ```
 
 Confirm your local models and API:
@@ -120,7 +121,7 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full design and [SECU
 Open **Settings** in the side panel:
 
 - **Ollama base URL** — default `http://127.0.0.1:11434`. Only localhost addresses on port 11434 are accepted.
-- **Model** — default `qwen3.5:9b`. The UI warns when a model is likely too large for an 8 GB GPU (e.g. `qwen3.5:27b`, `qwen3.5:35b`, `qwen3.5:122b`) and **rejects** cloud model names (e.g. `qwen3.5:cloud`).
+- **Model** — default `qwen3.5:4b` (fits an 8 GB GPU). The UI warns when a model is likely too large for an 8 GB GPU (e.g. `qwen3.5:27b`, `qwen3.5:35b`, `qwen3.5:122b`) and **rejects** cloud model names (e.g. `qwen3.5:cloud`).
 - **Temperature** — default `0` for consistent classification.
 - **Local-only enforcement** — locked on for this MVP.
 - **JSON-schema output** — on by default; falls back to robust JSON extraction + retry if the model doesn't honor it.

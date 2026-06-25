@@ -138,11 +138,14 @@ export interface ModelAssessment {
   warning: string | null;
 }
 
-/** The model pinned as recommended for the target machine. */
-export const RECOMMENDED_MODEL = "qwen3.5:9b";
+/**
+ * The model pinned as recommended for the target machine. 4B fully fits an
+ * 8 GB GPU; 9B measured at ~28% CPU offload on an RTX 4060, which is slow.
+ */
+export const RECOMMENDED_MODEL = "qwen3.5:4b";
 
 /** Fallback models, in order of preference, all expected to run locally. */
-export const FALLBACK_MODELS = ["qwen3.5:4b", "qwen3.5:2b", "qwen2.5:7b"] as const;
+export const FALLBACK_MODELS = ["qwen3.5:2b", "qwen2.5:7b"] as const;
 
 /** Models explicitly flagged as too large for an 8 GB GPU. */
 export const TOO_LARGE_MODELS = ["qwen3.5:27b", "qwen3.5:35b", "qwen3.5:122b"] as const;

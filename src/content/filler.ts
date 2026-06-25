@@ -40,6 +40,22 @@ function normalizeDate(value: string): string {
   return v;
 }
 
+/**
+ * Set an input/textarea value through the prototype's native setter so that
+ * framework value trackers (React, and Angular/Vue in practice) register the
+ * change. Setting `el.value` directly is silently reverted by React.
+ */
+function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  const proto =
+    el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const desc = Object.getOwnPropertyDescriptor(proto, "value");
+  if (desc && typeof desc.set === "function") {
+    desc.set.call(el, value);
+  } else {
+    el.value = value;
+  }
+}
+
 function fireEvents(el: Element): void {
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -83,7 +99,7 @@ async function fillOne(ref: FieldRef, value: string): Promise<FillResult> {
         let v = value;
         if ((el as HTMLInputElement).type === "date") v = normalizeDate(v);
         el.focus();
-        (el as HTMLInputElement).value = v;
+        setNativeValue(el, v);
         fireEvents(el);
         el.style.outline = FILLED_OUTLINE;
         return { fieldId, filled: true };
