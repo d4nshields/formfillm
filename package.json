@@ -2,8 +2,31 @@
   "name": "formfillm",
   "version": "0.1.0",
   "private": true,
-  "description": "Privacy-first local LLM form filling with informed consent.",
+  "description": "Privacy-first local LLM form filling with informed consent. A Manifest V3 Chrome extension that classifies and fills web forms using only a locally running Ollama model — your data never leaves your machine.",
+  "license": "MIT",
+  "author": "Dan Shields",
   "type": "module",
+  "homepage": "https://github.com/d4nshields/formfillm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d4nshields/formfillm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/d4nshields/formfillm/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "ollama",
+    "local-llm",
+    "privacy",
+    "form-filling",
+    "autofill",
+    "typescript"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "node scripts/build.mjs --watch",
     "build": "node scripts/build.mjs",

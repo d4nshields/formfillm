@@ -4,3 +4,12 @@ dist/
 .DS_Store
 .vite/
 coverage/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+
+# Packaged extension
+*.zip

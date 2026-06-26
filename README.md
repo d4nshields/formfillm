@@ -159,9 +159,21 @@ See [SECURITY.md](./SECURITY.md) for the full list and planned future work.
 
 ---
 
-## Reference / attribution
+## Contributing
 
-The DOM-scanning, label-resolution, event-dispatch, and ARIA-listbox techniques were **studied** from the open-source [SmartFill AI](https://github.com/) project (MIT, © Phạm Văn Huynh). formfillm is a clean, independent TypeScript implementation with a different architecture, privacy model, naming, UI, and prompts — **no source code was copied**. See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md#reference-use) for details.
+Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) — in
+particular the **privacy invariants that must not regress** — and run the green
+gate (`npm run typecheck && npm run lint && npm run test && npm run build`)
+before opening a pull request. Security and threat-model notes live in
+[SECURITY.md](./SECURITY.md).
+
+---
+
+## Reference & attribution
+
+**formfillm is an independent, original work — not a derivative of any other project.** No source code, assets, or file/project structure were copied or adapted from elsewhere.
+
+In the spirit of giving credit where due: while building formfillm, the open-source **SmartFill AI** project by Phạm Văn Huynh (MIT-licensed) was consulted as *one learning reference* for standard, widely-used browser form-filling techniques — DOM scanning, label resolution, event dispatch, and ARIA-widget handling. These are general web-platform patterns, not unique inventions; formfillm implements them from scratch in TypeScript with its own architecture, privacy model, UI, and prompts. The acknowledgment reflects that reference and nothing more. See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md#reference-use) for the specifics of what was learned versus how formfillm differs.
 
 ## License
 

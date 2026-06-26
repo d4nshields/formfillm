@@ -128,9 +128,11 @@ Static files (`manifest.json`, `sidepanel.html`, `sidepanel.css`, `icons/`) are 
 
 ## Reference use
 
-The label-resolution strategy (label-for → closest label → aria-label → aria-labelledby → placeholder → nearby text), radio-group dedup by `name`, ARIA `radiogroup`/`listbox` handling, event dispatch (`input`/`change`/`blur`), and simulated pointer clicks for custom dropdowns were **studied** from the MIT-licensed [SmartFill AI](https://github.com/) project (© Phạm Văn Huynh). formfillm reimplements these ideas in strict TypeScript with a different architecture and an inverted privacy model:
+**formfillm is an independent, original work and is not a derivative of any other project.** No source code, assets, or project structure were copied or adapted; the scanning and filling code in `src/content/` was written from scratch.
 
-| | SmartFill AI (reference) | formfillm |
+For honest credit: common browser form-filling techniques — the label-resolution strategy (label-for → closest label → aria-label → aria-labelledby → placeholder → nearby text), radio-group dedup by `name`, ARIA `radiogroup`/`listbox` handling, event dispatch (`input`/`change`/`blur`), and simulated pointer clicks for custom dropdowns — were **learned with the MIT-licensed SmartFill AI project by Phạm Văn Huynh as one reference**. These are general web-platform patterns, not unique inventions. formfillm implements them independently, in strict TypeScript, with a different architecture and an inverted privacy model:
+
+| | Typical autofill extensions (incl. the reference) | formfillm |
 |--|--------------------------|-----------|
 | Profile → model | Full profile sent in the prompt | **Never** sent; metadata only |
 | Injection | Static `content_scripts` on `<all_urls>` | `activeTab` + on-demand `executeScript` |
@@ -139,4 +141,4 @@ The label-resolution strategy (label-for → closest label → aria-label → ar
 | Language | Plain JS | Strict TypeScript |
 | Record | — | Value-free disclosure ledger |
 
-**No source code was copied.** If any meaningful snippet were ever reused, the MIT notice would be preserved and the copied portion documented here.
+**No source code was copied**, so the reference's copyright notice is intentionally *not* bundled with formfillm (doing so would wrongly imply a derivative work). The credit above is an acknowledgment of a learning reference only. If any meaningful snippet were ever reused in the future, its MIT notice would be preserved and the copied portion documented here.
