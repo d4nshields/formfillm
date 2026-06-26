@@ -96,6 +96,8 @@ const state: ReviewState = {
 let settings: Settings;
 let profile: Profile;
 let currentView: View = "scan";
+/** When set, the scan view shows a "page changed — re-scan" prompt. */
+let pageChangedNotice: string | null = null;
 
 const viewRoot = () => document.getElementById("view") as HTMLElement;
 const statusRoot = () => document.getElementById("status") as HTMLElement;
@@ -244,15 +246,18 @@ function renderScanView(root: HTMLElement): void {
 function renderIntro(root: HTMLElement): void {
   root.append(
     el("div", { class: "ff-actions" }, [
-      button("Scan this page", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
+      button(pageChangedNotice ? "Re-scan this page" : "Scan this page", () => void doScan(), {
+        class: "ff-btn ff-btn-primary",
+      }),
     ]),
   );
   root.append(
     el("div", {
-      class: "ff-guidance",
+      class: "ff-guidance" + (pageChangedNotice ? " ff-card-warning" : ""),
       attrs: { id: "guidance", role: "status", "aria-live": "polite" },
-      text:
-        state.fields.length === 0
+      text: pageChangedNotice
+        ? pageChangedNotice
+        : state.fields.length === 0
           ? "Click “Scan this page”. formfillm looks at the form, then walks you through each thing it asks for — one at a time — and explains it before anything is filled."
           : `Found ${state.fields.length} field(s). Classifying with the local model…`,
     }),
@@ -592,13 +597,8 @@ async function highlight(fieldId: string | null): Promise<void> {
   await sendBg({ type: MSG.HighlightField, tabId: state.tabId, fieldId }).catch(() => undefined);
 }
 
-async function doScan(): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  debugLog("panel", "active tab query →", { id: tab?.id, url: tab?.url, title: tab?.title });
-  const tabId = tab?.id ?? null;
-
-  // Reset session state and show the intro so status/errors have a home.
-  state.tabId = tabId;
+/** Clear all per-scan session state back to the idle intro. */
+function resetScanSession(): void {
   state.fields = [];
   state.classifications = new Map();
   state.decisions = new Map();
@@ -610,6 +610,53 @@ async function doScan(): Promise<void> {
   state.ledgerCommitted = false;
   state.guidedIndex = 0;
   state.stage = "idle";
+}
+
+/**
+ * The bound tab reloaded or navigated, so the scanned fields no longer match
+ * what's on screen. Preserve any decisions already made in the ledger, then
+ * reset and prompt a re-scan. Element refs in the page are gone after a load,
+ * so keeping the old fields would only mislead.
+ */
+async function handlePageChanged(reason: string): Promise<void> {
+  if (state.fields.length === 0 && state.stage === "idle") return; // nothing to invalidate
+  debugLog("panel", "bound page changed — invalidating scan", { reason, tabId: state.tabId });
+  // Best-effort: record what the user actually decided before they left.
+  if (state.decisions.size > 0) {
+    try {
+      await commitSessionLedger();
+    } catch {
+      /* ledger is best-effort here */
+    }
+  }
+  resetScanSession();
+  state.page = null;
+  pageChangedNotice =
+    "The page changed (reloaded or navigated), so the previous scan no longer matches what's on screen. Scan again to review the current form.";
+  if (currentView === "scan") render();
+}
+
+/** Invalidate the scan when the bound tab reloads or navigates (incl. SPA). */
+function wirePageChangeReset(): void {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (tabId !== state.tabId) return;
+    // status "loading" = full reload/navigation (URL may be unchanged);
+    // changeInfo.url = SPA/hash sub-page navigation without a reload.
+    if (changeInfo.status === "loading" || typeof changeInfo.url === "string") {
+      void handlePageChanged(changeInfo.url ? `url:${changeInfo.url}` : "reload");
+    }
+  });
+}
+
+async function doScan(): Promise<void> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  debugLog("panel", "active tab query →", { id: tab?.id, url: tab?.url, title: tab?.title });
+  const tabId = tab?.id ?? null;
+
+  // Reset session state and show the intro so status/errors have a home.
+  state.tabId = tabId;
+  pageChangedNotice = null;
+  resetScanSession();
   render();
 
   if (tabId === null) {
@@ -1136,6 +1183,7 @@ async function main(): Promise<void> {
   state.tabId = await activeTabId();
   wireNav();
   wireFieldFocusJump();
+  wirePageChangeReset();
   await refreshStatus();
   setView("scan");
 }

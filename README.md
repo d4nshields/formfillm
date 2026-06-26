@@ -78,6 +78,8 @@ npm run build      # outputs dist/
 6. Use **Back / Next** to move around — or **click any field directly on the page** and the wizard jumps straight to that field's step. At the end you get a **summary** of what was filled, skipped, and flagged.
 7. Review the filled values on the page and submit the form yourself — formfillm never submits.
 
+If you reload the page or navigate to a different sub-page, the scanned fields no longer match what's on screen, so formfillm clears the old scan and prompts you to **scan again** (any decisions you'd already made are saved to the ledger first).
+
 Open **Review profile** first to enter your data (or **Create demo profile** for fake values to test with). A value-free record of your decisions is kept in **Disclosure ledger**.
 
 ---
