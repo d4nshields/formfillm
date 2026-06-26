@@ -137,6 +137,41 @@ async function ollamaChat(
   forceJsonString: boolean,
 ): Promise<string> {
   const format = forceJsonString ? "json" : opts.jsonSchemaMode ? schema : "json";
+  const messages = [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+
+  // Disable model "thinking". Reasoning models (e.g. qwen3.x) otherwise spend
+  // their whole token budget on a hidden `thinking` field and return EMPTY
+  // `content` under constrained JSON output — which surfaces as "Ollama
+  // returned no content" — and are far slower. We want the JSON answer, not
+  // reasoning, so `think: false` is both a correctness and a speed fix.
+  const postChat = async (sendThink: boolean): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      olog("ollamaChat ✗ aborting after timeout", { ms: OLLAMA_TIMEOUT_MS });
+      controller.abort();
+    }, OLLAMA_TIMEOUT_MS);
+    try {
+      return await fetch(`${opts.baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: opts.model,
+          stream: false,
+          format,
+          ...(sendThink ? { think: false } : {}),
+          keep_alive: OLLAMA_KEEP_ALIVE,
+          options: { temperature: opts.temperature },
+          messages,
+        }),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const startedAt = Date.now();
   olog("ollamaChat → request", {
@@ -145,36 +180,23 @@ async function ollamaChat(
     promptChars: system.length + user.length,
   });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    olog("ollamaChat ✗ aborting after timeout", { ms: OLLAMA_TIMEOUT_MS });
-    controller.abort();
-  }, OLLAMA_TIMEOUT_MS);
   let resp: Response;
   try {
-    resp = await fetch(`${opts.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: opts.model,
-        stream: false,
-        format,
-        keep_alive: OLLAMA_KEEP_ALIVE,
-        options: { temperature: opts.temperature },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-    });
+    resp = await postChat(true);
+    // A non-thinking model may reject the `think` flag (4xx mentioning think);
+    // retry once without it so fallback models still work.
+    if (!resp.ok && resp.status >= 400 && resp.status < 500) {
+      const peek = await resp.clone().text().catch(() => "");
+      if (/think/i.test(peek)) {
+        olog("ollamaChat ↺ retrying without think flag", { status: resp.status });
+        resp = await postChat(false);
+      }
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
       `Could not reach local Ollama at ${opts.baseUrl}. Is Ollama running? (${msg})`,
     );
-  } finally {
-    clearTimeout(timer);
   }
 
   if (!resp.ok) {
@@ -192,7 +214,9 @@ async function ollamaChat(
   const data = (await resp.json()) as { message?: { content?: string } };
   const content = data?.message?.content;
   if (typeof content !== "string" || content.length === 0) {
-    throw new Error("Ollama returned no content.");
+    throw new Error(
+      "Ollama returned no content (a reasoning model may have emitted only hidden thinking).",
+    );
   }
   return content;
 }
