@@ -7,9 +7,16 @@
  * leave the page; only metadata does.
  */
 
-import { MSG, parseMessage, type ApplyFillResponse, type ScanPageResponse } from "../shared/messages.js";
+import {
+  MSG,
+  parseMessage,
+  type ApplyFillResponse,
+  type PasswordContextResponse,
+  type ScanPageResponse,
+} from "../shared/messages.js";
 import { scanFields, type FieldRef } from "./scanner.js";
 import { applyFills, highlightField } from "./filler.js";
+import { getPasswordContext } from "./password-context.js";
 import { mountOverlay, removeOverlay, setOverlayStatus } from "./overlay.js";
 
 interface ContentGlobal {
@@ -80,6 +87,14 @@ function init(): void {
         return false;
       }
 
+      case MSG.PasswordContext: {
+        const refs = g.__formfillmRefs ?? new Map<string, FieldRef>();
+        const context = getPasswordContext(refs, msg.fieldId);
+        const res: PasswordContextResponse = { ok: true, context };
+        sendResponse(res);
+        return false;
+      }
+
       case MSG.RemoveOverlay:
         removeOverlay();
         sendResponse({ ok: true });
@@ -87,6 +102,7 @@ function init(): void {
 
       case MSG.Classify:
       case MSG.TestOllama:
+      case MSG.ParsePasswordPolicy:
         // These are background-only messages; the content script ignores them.
         sendResponse({ ok: false, error: "Not handled in content script." });
         return false;

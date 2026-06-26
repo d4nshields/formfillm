@@ -88,8 +88,21 @@
         <p class="hint">formfillm must classify this as secret and never fill it.</p>
 
         <label for="password">Account password</label>
-        <input id="password" name="password" type="password" autocomplete="new-password" />
-        <p class="hint">formfillm must never fill password fields.</p>
+        <input id="password" name="password" type="password" autocomplete="new-password"
+               minlength="8" maxlength="50" aria-describedby="pw-rules" />
+        <div id="pw-rules" class="hint">
+          Password must include:
+          <ul>
+            <li>8 to 50 characters</li>
+            <li>Lowercase and uppercase letters (e.g. Aa)</li>
+            <li>One number (e.g. 1234)</li>
+          </ul>
+          Password must NOT include your name, email address, or spaces.
+        </div>
+
+        <label for="password2">Confirm password</label>
+        <input id="password2" name="password2" type="password" autocomplete="new-password" />
+        <p class="hint">formfillm fills a generated password only on your explicit request, and never a stored one.</p>
       </fieldset>
 
       <fieldset>

@@ -80,16 +80,28 @@ formfillm is a Manifest V3 Chrome extension split into three runtime contexts pl
 - `profile-keys.ts` — category → local profile key resolution (returns null for unsafe categories).
 - `ledger.ts` — `buildLedgerEntry` (+ `redactLedgerEntry` defensive pass).
 - `sanitize.ts` — field-metadata sanitization (caps, control-char stripping, fixed key set).
-- `prompts.ts` — classifier system prompt + metadata-only user prompt builder.
+- `prompts.ts` — classifier + password-policy prompts (both metadata-only).
+- `password.ts` — CSPRNG password generator, policy normalization, and LLM policy-extraction merge. Pure/testable.
 
 ### Background (`src/background/service-worker.ts`)
 Side-panel wiring, message routing, local Ollama client (timeout, 403 guidance, schema-then-JSON retry), policy enforcement. Holds no profile data.
 
 ### Content (`src/content/`)
 - `scanner.ts` — DOM → `FieldMetadata[]` + an in-page registry mapping `fieldId` → element refs (refs never leave the page).
-- `filler.ts` — fills only approved fields, fires events, highlights, refuses password fields, never submits.
+- `filler.ts` — fills only approved fields, fires events, highlights, never submits. Refuses password fields unless the fill carries an explicit `allowSecret` flag (generated passwords only).
+- `password-context.ts` — on-demand reads a password field's constraints + nearby policy text + a confirm-field id.
 - `overlay.ts` — minimal shadow-DOM status widget.
 - `content-entry.ts` — idempotent init + message listener.
+
+### Password generation flow
+
+For new-password fields the side panel runs: `PasswordContext` (content reads
+constraints + policy text) → `ParsePasswordPolicy` (background; local LLM
+structures the rules, fails closed to the input's constraints) → generate
+locally with the CSPRNG (avoiding the user's name/email) → `ApplyFill` with
+`allowSecret` into the password and confirm fields. The password is shown +
+copyable and **never stored**; the ledger records a value-free `generated`
+decision.
 
 ### Side panel (`src/sidepanel/`)
 - `sidepanel.ts` — controller and views (scan/consent, profile, ledger, settings).

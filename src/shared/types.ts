@@ -178,6 +178,7 @@ export const LEDGER_DECISIONS = [
   "skipped",
   "marked_wrong",
   "never_fill",
+  "generated", // a fresh strong password was generated and filled (value never stored)
 ] as const;
 export type LedgerDecision = (typeof LEDGER_DECISIONS)[number];
 

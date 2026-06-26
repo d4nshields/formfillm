@@ -20,6 +20,9 @@ import {
   type ApplyFillResponse,
   type ClassifyResponse,
   type Message,
+  type ParsePasswordPolicyResponse,
+  type PasswordContext,
+  type PasswordContextResponse,
   type ScanPageResponse,
   type TestOllamaResponse,
 } from "../shared/messages.js";
@@ -28,10 +31,16 @@ import {
   extractJson,
   validateClassificationResponse,
 } from "../shared/classification-schema.js";
-import { buildClassificationPrompt, CLASSIFIER_SYSTEM_PROMPT } from "../shared/prompts.js";
+import {
+  buildClassificationPrompt,
+  buildPasswordPolicyPrompt,
+  CLASSIFIER_SYSTEM_PROMPT,
+  PASSWORD_POLICY_SYSTEM_PROMPT,
+} from "../shared/prompts.js";
 import { reconcileClassification } from "../shared/sensitivity.js";
 import { sanitizeFieldsForModel } from "../shared/sanitize.js";
 import { validateModelName, validateOllamaUrl } from "../shared/ollama-policy.js";
+import { mergePolicyExtraction, PASSWORD_POLICY_SCHEMA, policyFromAttributes } from "../shared/password.js";
 import { DEFAULT_SETTINGS, STORAGE_KEYS, type Settings } from "../shared/types.js";
 
 // Cold model loads (especially when partly CPU-offloaded) can take a while,
@@ -123,13 +132,10 @@ async function ollamaChat(
   opts: OllamaChatOptions,
   system: string,
   user: string,
+  schema: object,
   forceJsonString: boolean,
 ): Promise<string> {
-  const format = forceJsonString
-    ? "json"
-    : opts.jsonSchemaMode
-      ? CLASSIFICATION_JSON_SCHEMA
-      : "json";
+  const format = forceJsonString ? "json" : opts.jsonSchemaMode ? schema : "json";
 
   const startedAt = Date.now();
   log("ollamaChat → request", {
@@ -230,7 +236,7 @@ async function handleClassify(
   let lastError: string | undefined;
   for (let attempt = 0; attempt < 2 && parsed === null; attempt++) {
     try {
-      const content = await ollamaChat(opts, CLASSIFIER_SYSTEM_PROMPT, userPrompt, attempt === 1);
+      const content = await ollamaChat(opts, CLASSIFIER_SYSTEM_PROMPT, userPrompt, CLASSIFICATION_JSON_SCHEMA, attempt === 1);
       parsed = extractJson(content);
       if (parsed === null) lastError = "Model output was not valid JSON.";
     } catch (e) {
@@ -270,6 +276,52 @@ async function handleTestOllama(): Promise<TestOllamaResponse> {
       error: e instanceof Error ? e.message : String(e),
       current: settings.model,
     };
+  }
+}
+
+/**
+ * Extract a structured password policy. Always succeeds: starts from the
+ * input's own constraints and, when policy text is present and Ollama is
+ * configured, asks the local model to refine it — failing closed to the
+ * attribute baseline on any error. Never sees user data.
+ */
+async function handleParsePasswordPolicy(context: PasswordContext): Promise<ParsePasswordPolicyResponse> {
+  const base = policyFromAttributes({
+    minLength: context.minLength,
+    maxLength: context.maxLength,
+    pattern: context.pattern,
+  });
+
+  if (!context.policyText) return { ok: true, policy: base };
+
+  const settings = await getSettings();
+  const url = validateOllamaUrl(settings.ollamaBaseUrl);
+  const model = validateModelName(settings.model);
+  if (!url.ok || !model.ok) return { ok: true, policy: base };
+
+  const opts: OllamaChatOptions = {
+    baseUrl: url.normalized,
+    model: settings.model,
+    temperature: settings.temperature,
+    jsonSchemaMode: settings.jsonSchemaMode,
+  };
+  const userPrompt = buildPasswordPolicyPrompt({
+    minLength: context.minLength,
+    maxLength: context.maxLength,
+    pattern: context.pattern,
+    policyText: context.policyText,
+  });
+
+  try {
+    let parsed: unknown = null;
+    for (let attempt = 0; attempt < 2 && parsed === null; attempt++) {
+      const content = await ollamaChat(opts, PASSWORD_POLICY_SYSTEM_PROMPT, userPrompt, PASSWORD_POLICY_SCHEMA, attempt === 1);
+      parsed = extractJson(content);
+    }
+    return { ok: true, policy: mergePolicyExtraction(base, parsed) };
+  } catch (e) {
+    log("password policy extraction failed; using attribute baseline", e);
+    return { ok: true, policy: base };
   }
 }
 
@@ -389,5 +441,20 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
         .catch(() => sendResponse({ ok: false }));
       return true;
     }
+
+    case MSG.PasswordContext: {
+      if (typeof msg.tabId !== "number") {
+        sendResponse({ ok: false, error: "Missing tabId." });
+        return false;
+      }
+      forwardToContent<PasswordContextResponse>(msg.tabId, { type: MSG.PasswordContext, fieldId: msg.fieldId })
+        .then(sendResponse)
+        .catch((e: unknown) => sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      return true;
+    }
+
+    case MSG.ParsePasswordPolicy:
+      handleParsePasswordPolicy(msg.context).then(sendResponse);
+      return true;
   }
 });

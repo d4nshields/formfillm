@@ -15,6 +15,8 @@ export const MSG = {
   ApplyFill: "formfillm/apply_fill",
   HighlightField: "formfillm/highlight_field",
   RemoveOverlay: "formfillm/remove_overlay",
+  PasswordContext: "formfillm/password_context",
+  ParsePasswordPolicy: "formfillm/parse_password_policy",
   Ping: "formfillm/ping",
 } as const;
 
@@ -28,6 +30,24 @@ export interface PageContext {
 export interface FillInstruction {
   fieldId: string;
   value: string;
+  /**
+   * Permits filling a password field. ONLY set for freshly generated
+   * passwords; the content script refuses password fills without it. Stored
+   * profile secrets are never filled (and never stored in the first place).
+   */
+  allowSecret?: boolean;
+}
+
+/** Live password-field context gathered on demand from the page. */
+export interface PasswordContext {
+  fieldId: string;
+  minLength: number | null;
+  maxLength: number | null;
+  pattern: string | null;
+  /** Visible/aria policy text near the field (e.g. "8 to 50 characters…"). */
+  policyText: string | null;
+  /** A matching confirm-password field on the page, if detected. */
+  confirmFieldId: string | null;
 }
 
 export interface FillResult {
@@ -65,6 +85,15 @@ export interface RemoveOverlayRequest {
   type: typeof MSG.RemoveOverlay;
   tabId?: number;
 }
+export interface PasswordContextRequest {
+  type: typeof MSG.PasswordContext;
+  tabId?: number;
+  fieldId: string;
+}
+export interface ParsePasswordPolicyRequest {
+  type: typeof MSG.ParsePasswordPolicy;
+  context: PasswordContext;
+}
 export interface PingRequest {
   type: typeof MSG.Ping;
 }
@@ -76,6 +105,8 @@ export type Message =
   | ApplyFillRequest
   | HighlightFieldRequest
   | RemoveOverlayRequest
+  | PasswordContextRequest
+  | ParsePasswordPolicyRequest
   | PingRequest;
 
 // --- Responses --------------------------------------------------------------
@@ -102,6 +133,17 @@ export interface TestOllamaResponse {
 export interface ApplyFillResponse {
   ok: boolean;
   results?: FillResult[];
+  error?: string;
+}
+export interface PasswordContextResponse {
+  ok: boolean;
+  context?: PasswordContext;
+  error?: string;
+}
+export interface ParsePasswordPolicyResponse {
+  ok: boolean;
+  /** Structured PasswordPolicy (see shared/password.ts), or undefined on error. */
+  policy?: unknown;
   error?: string;
 }
 export interface PingResponse {
@@ -145,7 +187,11 @@ export function parseMessage(raw: unknown): Message | null {
       const fills: FillInstruction[] = [];
       for (const f of raw.fills) {
         if (isObj(f) && typeof f.fieldId === "string" && typeof f.value === "string") {
-          fills.push({ fieldId: f.fieldId, value: f.value });
+          fills.push({
+            fieldId: f.fieldId,
+            value: f.value,
+            ...(f.allowSecret === true ? { allowSecret: true } : {}),
+          });
         } else {
           return null; // reject the whole batch if any instruction is malformed
         }
@@ -156,6 +202,16 @@ export function parseMessage(raw: unknown): Message | null {
       const fieldId = typeof raw.fieldId === "string" ? raw.fieldId : raw.fieldId === null ? null : undefined;
       if (fieldId === undefined) return null;
       return { type, fieldId, ...(typeof raw.tabId === "number" ? { tabId: raw.tabId } : {}) };
+    }
+    case MSG.PasswordContext: {
+      if (typeof raw.fieldId !== "string") return null;
+      return { type, fieldId: raw.fieldId, ...(typeof raw.tabId === "number" ? { tabId: raw.tabId } : {}) };
+    }
+    case MSG.ParsePasswordPolicy: {
+      if (!isObj(raw.context) || typeof (raw.context as Record<string, unknown>).fieldId !== "string") {
+        return null;
+      }
+      return { type, context: raw.context as unknown as PasswordContext };
     }
   }
 }

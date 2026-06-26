@@ -8,6 +8,7 @@ formfillm is a Manifest V3 Chrome extension that helps you fill web forms — bu
 - 🧠 **Metadata-only classification.** The model sees form field *labels and structure*, never your stored profile values.
 - ✅ **Consent per field.** Approve, edit, skip, or mark-wrong each field. Secrets (passwords, SIN/SSN, 2FA, banking) are never filled.
 - 📒 **Disclosure ledger.** Records *categories and decisions* — never actual values.
+- 🔑 **Local password generation.** For sign-up forms it can generate a strong password (Web Crypto CSPRNG) that meets the site's stated rules, fill it, and hand off to your password manager — the password is shown, copyable, and **never stored** by formfillm.
 - 🚫 **Never submits.** formfillm fills fields and highlights them; you review and submit yourself.
 
 > ⚠️ **MVP status.** Profile data is stored unencrypted in `chrome.storage.local`. Do not store secrets in your profile. See [SECURITY.md](./SECURITY.md).
@@ -73,7 +74,7 @@ npm run build      # outputs dist/
 2. Click the **formfillm** toolbar icon to open the side panel (this grants `activeTab` access to that page).
 3. Click **Scan this page**.
 4. formfillm walks you through the form **one field at a time** ("Field 2 of 6"). For each field it shows a plain-language explanation, the sensitivity, and — when you have a matching saved value — exactly what it would fill.
-5. For each field choose: **Yes, fill it** (fills that field immediately and moves on), **Edit** / **Type it in** (enter or override the value, then fill), **Skip**, or **This looks wrong**. Secret fields (passwords, SIN/SSN, etc.) are shown but never filled.
+5. For each field choose: **Yes, fill it** (fills that field immediately and moves on), **Edit** / **Type it in** (enter or override the value, then fill), **Skip**, or **This looks wrong**. Secret fields (SIN/SSN, etc.) are shown but never filled. **New-password fields** offer **Generate strong password** — formfillm reads the site's rules, generates a compliant password locally, fills it (and any confirm field), and shows it with a **Copy** button so you can save it in your password manager. Make sure your manager saves it on submit; formfillm never stores it.
 6. Use **Back / Next** to move around; at the end you get a **summary** of what was filled, skipped, and flagged.
 7. Review the filled values on the page and submit the form yourself — formfillm never submits.
 

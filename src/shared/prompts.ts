@@ -75,3 +75,38 @@ Allowed categories, sensitivities, and recommendedActions are listed in the payl
 PAYLOAD:
 ${JSON.stringify(payload, null, 2)}`;
 }
+
+// ---------------------------------------------------------------------------
+// Password policy extraction. Receives ONLY the site's policy text and the
+// input's own constraints — never any user data.
+// ---------------------------------------------------------------------------
+
+export const PASSWORD_POLICY_SYSTEM_PROMPT = `You extract a website's password requirements into a strict JSON object so a generator can build a compliant password.
+
+Rules:
+- Use only the provided policy text and input constraints. Do not invent requirements.
+- Set requireLower/requireUpper/requireDigit true only if the text requires that character class.
+- requireSymbol true only if a special/symbol character is explicitly required.
+- symbolsAllowed: true unless the text clearly forbids symbols/special characters.
+- forbidSpaces: true if spaces are disallowed (e.g. "no spaces"), otherwise true by default for safety.
+- minLength/maxLength: numbers if stated, otherwise null.
+- Output ONLY valid JSON matching the schema. No prose.`;
+
+export function buildPasswordPolicyPrompt(input: {
+  minLength: number | null;
+  maxLength: number | null;
+  pattern: string | null;
+  policyText: string | null;
+}): string {
+  return `Extract the password requirements as JSON.
+
+Input constraints:
+- minLength: ${input.minLength ?? "null"}
+- maxLength: ${input.maxLength ?? "null"}
+- pattern: ${input.pattern ? JSON.stringify(input.pattern) : "null"}
+
+Policy text from the page:
+"""
+${input.policyText ?? "(none provided)"}
+"""`;
+}

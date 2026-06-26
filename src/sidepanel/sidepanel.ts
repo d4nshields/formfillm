@@ -14,6 +14,8 @@ import {
   type ClassifyResponse,
   type FillInstruction,
   type PageContext,
+  type ParsePasswordPolicyResponse,
+  type PasswordContextResponse,
   type ScanPageResponse,
   type TestOllamaResponse,
 } from "../shared/messages.js";
@@ -26,6 +28,11 @@ import {
   validateModelName,
   validateOllamaUrl,
 } from "../shared/ollama-policy.js";
+import {
+  DEFAULT_PASSWORD_POLICY,
+  generatePassword,
+  type PasswordPolicy,
+} from "../shared/password.js";
 import { isFillable } from "../shared/sensitivity.js";
 import { getProfileValue, resolveProfileKey } from "../shared/profile-keys.js";
 import { buildLedgerEntry } from "../shared/ledger.js";
@@ -42,7 +49,7 @@ import {
 import { button, clear, el } from "./ui.js";
 
 type View = "scan" | "profile" | "ledger" | "settings";
-type Decision = "pending" | "approved" | "edited" | "skipped" | "marked_wrong";
+type Decision = "pending" | "approved" | "edited" | "skipped" | "marked_wrong" | "generated";
 type ScanStage = "idle" | "guided" | "summary";
 
 interface ReviewState {
@@ -54,6 +61,10 @@ interface ReviewState {
   editedValues: Map<string, string>;
   /** Per-field fill outcome, recorded as each field is approved. */
   fillResults: Map<string, boolean>;
+  /** Generated passwords held in memory only (never stored), keyed by field id. */
+  generatedPasswords: Map<string, string>;
+  /** Field id currently generating a password, or null. */
+  generating: string | null;
   /** Guided wizard: which field index we are on, and the overall stage. */
   stage: ScanStage;
   guidedIndex: number;
@@ -71,6 +82,8 @@ const state: ReviewState = {
   decisions: new Map(),
   editedValues: new Map(),
   fillResults: new Map(),
+  generatedPasswords: new Map(),
+  generating: null,
   stage: "idle",
   guidedIndex: 0,
   editing: null,
@@ -301,7 +314,13 @@ function renderGuidedStep(root: HTMLElement): void {
   const decided = state.decisions.get(field.fieldId);
   const filled = state.fillResults.get(field.fieldId);
 
-  if (!isFillable(c)) {
+  const isPassword = (field.inputType ?? "").toLowerCase() === "password";
+  // Only offer generation for new/registration passwords, not login fields.
+  const isLoginPassword = isPassword && (field.autocomplete ?? "").toLowerCase().includes("current-password");
+
+  if (isPassword && !isLoginPassword) {
+    renderPasswordStep(card, field);
+  } else if (!isFillable(c)) {
     card.append(el("p", { class: "ff-card-neverfill", text: "🔒 formfillm will not fill this field." }));
     card.append(
       el("div", { class: "ff-card-controls" }, [
@@ -366,6 +385,134 @@ function renderGuidedStep(root: HTMLElement): void {
 
   root.append(card);
   root.append(navRow(idx, total));
+}
+
+/** Profile-derived substrings a generated password must not contain. */
+function passwordAvoidList(): string[] {
+  const v = profile.values;
+  const out: string[] = [];
+  for (const k of ["identity.first_name", "identity.last_name", "identity.full_name", "contact.email"]) {
+    const val = v[k];
+    if (typeof val === "string" && val.trim()) out.push(val.trim());
+  }
+  const email = v["contact.email"];
+  if (typeof email === "string" && email.includes("@")) out.push(email.split("@")[0]!);
+  return out;
+}
+
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    flash("Password copied to clipboard.");
+  } catch {
+    flash("Could not copy — select and copy it manually.");
+  }
+}
+
+/** Render the password step: either the generate prompt or the generated result. */
+function renderPasswordStep(card: HTMLElement, field: FieldMetadata): void {
+  card.append(
+    el("p", {
+      class: "ff-pw-intro",
+      text: "formfillm never stores passwords. It can generate a strong one that meets this site's rules, fill it here, and you save it in your password manager.",
+    }),
+  );
+
+  const generated = state.generatedPasswords.get(field.fieldId);
+
+  if (state.generating === field.fieldId) {
+    card.append(el("p", { class: "ff-card-decision", text: "Generating a strong password…" }));
+    return;
+  }
+
+  if (generated) {
+    card.append(
+      el("div", { class: "ff-pw-result" }, [
+        el("code", { class: "ff-pw-value", text: generated }),
+      ]),
+    );
+    card.append(
+      el("p", {
+        class: "ff-card-warning",
+        text: "✓ Filled. Save this in your password manager NOW. When you submit the form, your browser or manager should offer to save it — formfillm does not keep it.",
+      }),
+    );
+    card.append(
+      el("div", { class: "ff-card-controls" }, [
+        button("Copy password", () => void copyText(generated), { class: "ff-btn ff-btn-sm" }),
+        button("Regenerate", () => void generatePasswordFor(field), { class: "ff-btn ff-btn-sm" }),
+        button("Next ›", () => advance(), { class: "ff-btn ff-btn-primary ff-btn-sm" }),
+      ]),
+    );
+    return;
+  }
+
+  card.append(el("p", { class: "ff-card-question", text: `Create a strong password for ${siteHost()}?` }));
+  card.append(
+    el("div", { class: "ff-card-controls" }, [
+      button("Generate strong password", () => void generatePasswordFor(field), { class: "ff-btn ff-btn-primary ff-btn-sm" }),
+      button("Skip", () => guidedDecision(field, "skipped"), { class: "ff-btn ff-btn-sm" }),
+    ]),
+  );
+}
+
+async function generatePasswordFor(field: FieldMetadata): Promise<void> {
+  if (state.tabId === null) {
+    flash("Scan a page first.");
+    return;
+  }
+  state.generating = field.fieldId;
+  render();
+
+  // 1) Read live constraints + policy text from the page.
+  const ctxRes = await sendBg<PasswordContextResponse>({
+    type: MSG.PasswordContext,
+    tabId: state.tabId,
+    fieldId: field.fieldId,
+  }).catch(() => ({ ok: false }) as PasswordContextResponse);
+  const context = ctxRes.context ?? {
+    fieldId: field.fieldId,
+    minLength: null,
+    maxLength: null,
+    pattern: null,
+    policyText: null,
+    confirmFieldId: null,
+  };
+
+  // 2) Extract a structured policy (local LLM, fail-closed to attributes).
+  const polRes = await sendBg<ParsePasswordPolicyResponse>({
+    type: MSG.ParsePasswordPolicy,
+    context,
+  }).catch(() => ({ ok: false }) as ParsePasswordPolicyResponse);
+  const policy = (polRes.policy as PasswordPolicy | undefined) ?? DEFAULT_PASSWORD_POLICY;
+
+  // 3) Generate locally, avoiding the user's name/email.
+  const { password } = generatePassword(policy, passwordAvoidList());
+
+  // 4) Fill the password field (and a confirm field, if any).
+  const fills: FillInstruction[] = [{ fieldId: field.fieldId, value: password, allowSecret: true }];
+  if (context.confirmFieldId) {
+    fills.push({ fieldId: context.confirmFieldId, value: password, allowSecret: true });
+  }
+  const fillRes = await sendBg<ApplyFillResponse>({ type: MSG.ApplyFill, tabId: state.tabId, fills }).catch(
+    () => ({ ok: false }) as ApplyFillResponse,
+  );
+  const filled = Boolean(fillRes.results?.some((r) => r.fieldId === field.fieldId && r.filled));
+
+  // 5) Record (in memory only) — never persisted.
+  state.generatedPasswords.set(field.fieldId, password);
+  state.decisions.set(field.fieldId, "generated");
+  state.fillResults.set(field.fieldId, filled);
+  if (context.confirmFieldId) {
+    state.generatedPasswords.set(context.confirmFieldId, password);
+    state.decisions.set(context.confirmFieldId, "generated");
+    state.fillResults.set(
+      context.confirmFieldId,
+      Boolean(fillRes.results?.some((r) => r.fieldId === context.confirmFieldId && r.filled)),
+    );
+  }
+  state.generating = null;
+  render();
 }
 
 async function fillCurrentField(field: FieldMetadata, value: string): Promise<boolean> {
@@ -447,6 +594,8 @@ async function doScan(): Promise<void> {
   state.decisions = new Map();
   state.editedValues = new Map();
   state.fillResults = new Map();
+  state.generatedPasswords = new Map();
+  state.generating = null;
   state.editing = null;
   state.ledgerCommitted = false;
   state.guidedIndex = 0;
@@ -491,6 +640,7 @@ async function commitSessionLedger(): Promise<void> {
     const fillable = isFillable(c);
     const d = state.decisions.get(f.fieldId);
     const ledgerDecision =
+      d === "generated" ? "generated" :
       !fillable ? "never_fill" :
       d === "approved" ? "approved" :
       d === "edited" ? "edited" :
@@ -528,7 +678,10 @@ function renderSummary(root: HTMLElement): void {
     if (!c) continue;
     const d = state.decisions.get(f.fieldId);
     let outcome: string;
-    if (!isFillable(c)) {
+    if (d === "generated") {
+      outcome = state.fillResults.get(f.fieldId) ? "strong password generated & filled" : "password generated (could not fill)";
+      if (state.fillResults.get(f.fieldId)) filled++;
+    } else if (!isFillable(c)) {
       outcome = "never filled (secret)";
       never++;
     } else if ((d === "approved" || d === "edited") && state.fillResults.get(f.fieldId)) {

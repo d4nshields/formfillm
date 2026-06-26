@@ -83,11 +83,13 @@ function isPasswordField(ref: FieldRef): boolean {
   return el.tagName?.toLowerCase() === "input" && (el.type || "").toLowerCase() === "password";
 }
 
-async function fillOne(ref: FieldRef, value: string): Promise<FillResult> {
+async function fillOne(ref: FieldRef, value: string, allowSecret: boolean): Promise<FillResult> {
   const fieldId = ref.fieldId;
 
-  // Defense in depth: never fill password fields, regardless of instruction.
-  if (isPasswordField(ref)) {
+  // Defense in depth: never fill password fields UNLESS this is an explicitly
+  // allowed, freshly generated password (allowSecret). Stored profile secrets
+  // are never stored and never carry allowSecret.
+  if (isPasswordField(ref) && !allowSecret) {
     return { fieldId, filled: false, reason: "Password fields are never filled." };
   }
 
@@ -172,7 +174,7 @@ export async function applyFills(
       results.push({ fieldId: fill.fieldId, filled: false, reason: "Field not found on page." });
       continue;
     }
-    results.push(await fillOne(ref, fill.value));
+    results.push(await fillOne(ref, fill.value, fill.allowSecret === true));
   }
   return results;
 }

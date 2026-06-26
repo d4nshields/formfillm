@@ -58,6 +58,28 @@ Sending an entire personal profile to any model — even a local one — needles
 - `sidePanel` — the main UI.
 - `host_permissions` — limited to the three **local** Ollama origins (`http://127.0.0.1:11434/*`, `http://localhost:11434/*`, `http://[::1]:11434/*`). This is the one documented technical necessity: it lets the worker call your local model. It grants no access to any website.
 
+## Password generation (new-password fields)
+
+formfillm never fills a *stored* secret and never stores one. For **new-password**
+(registration) fields it offers a distinct, opt-in flow:
+
+- On your explicit click, it reads the field's own constraints (`minlength`/
+  `maxlength`/`pattern`) and the visible policy text, and the **local** model
+  structures that into rules (failing closed to the input's constraints).
+- It generates a compliant password using the Web Crypto CSPRNG
+  (`crypto.getRandomValues`, unbiased selection — never `Math.random`),
+  guaranteeing required character classes and avoiding your name/email.
+- It fills the password (and a detected confirm field) — this is the **only**
+  case where a password field is filled, gated by an explicit `allowSecret`
+  flag on the fill instruction; the content script refuses password fills
+  without it.
+- The generated password is held in memory only, shown to you with a **Copy**
+  button, and **never stored** by formfillm (not in the profile, not in the
+  ledger). You save it via your password manager's save-on-submit, or by
+  copying it. The ledger records the decision as `generated` with no value.
+
+Login (`current-password`) fields are not generated for and are never filled.
+
 ## Known MVP limitations
 
 - Profile data is **not encrypted at rest**. (The storage layer is isolated so encryption can be added without touching the UI or classifier.)
