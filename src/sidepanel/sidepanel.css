@@ -140,6 +140,46 @@ body {
 
 .ff-view {
   padding: 12px 14px 60px;
+  position: relative;
+}
+
+/* In-tab modal (e.g. stale-scan "Page changed") — covers the view only. */
+.ff-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(11, 15, 18, 0.72);
+  backdrop-filter: blur(1px);
+}
+.ff-modal-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 22px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: 12px;
+  max-width: 260px;
+  text-align: center;
+}
+.ff-modal-title {
+  margin: 0;
+  color: var(--text);
+}
+.ff-modal-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ff-modal-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .ff-actions {

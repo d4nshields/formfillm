@@ -234,6 +234,8 @@ function render(): void {
 function renderScanView(root: HTMLElement): void {
   if (state.fields.length === 0 || state.stage === "idle") {
     renderIntro(root);
+    // Stale-scan modal sits on top of the (reset) intro.
+    if (pageChangedNotice) renderPageChangedModal(root);
     return;
   }
   if (state.stage === "summary") {
@@ -246,21 +248,41 @@ function renderScanView(root: HTMLElement): void {
 function renderIntro(root: HTMLElement): void {
   root.append(
     el("div", { class: "ff-actions" }, [
-      button(pageChangedNotice ? "Re-scan this page" : "Scan this page", () => void doScan(), {
-        class: "ff-btn ff-btn-primary",
-      }),
+      button("Scan this page", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
     ]),
   );
   root.append(
     el("div", {
-      class: "ff-guidance" + (pageChangedNotice ? " ff-card-warning" : ""),
+      class: "ff-guidance",
       attrs: { id: "guidance", role: "status", "aria-live": "polite" },
-      text: pageChangedNotice
-        ? pageChangedNotice
-        : state.fields.length === 0
+      text:
+        state.fields.length === 0
           ? "Click “Scan this page”. formfillm looks at the form, then walks you through each thing it asks for — one at a time — and explains it before anything is filled."
           : `Found ${state.fields.length} field(s). Classifying with the local model…`,
     }),
+  );
+}
+
+/**
+ * Modal shown over the Form Guidance view after the bound page reloaded or
+ * navigated: the prior scan is stale, so we block it with a simple "page
+ * changed" prompt whose only action is to re-scan the current form.
+ */
+function renderPageChangedModal(root: HTMLElement): void {
+  root.append(
+    el(
+      "div",
+      { class: "ff-modal", attrs: { role: "alertdialog", "aria-modal": "true", "aria-label": "Page changed" } },
+      [
+        el("div", { class: "ff-modal-card" }, [
+          el("h2", { class: "ff-modal-title", text: "Page changed" }),
+          el("p", { class: "ff-modal-sub", text: "This scan is out of date. Re-scan to review the current form." }),
+          el("div", { class: "ff-modal-actions" }, [
+            button("Rescan", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
+          ]),
+        ]),
+      ],
+    ),
   );
 }
 
@@ -631,8 +653,7 @@ async function handlePageChanged(reason: string): Promise<void> {
   }
   resetScanSession();
   state.page = null;
-  pageChangedNotice =
-    "The page changed (reloaded or navigated), so the previous scan no longer matches what's on screen. Scan again to review the current form.";
+  pageChangedNotice = "stale"; // flag; the modal renders its own copy
   if (currentView === "scan") render();
 }
 
