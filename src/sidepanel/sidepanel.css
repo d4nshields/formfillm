@@ -239,6 +239,11 @@ body {
   color: var(--text);
   margin: 8px 0;
 }
+.ff-guidance-error {
+  border-color: var(--err);
+  border-left-color: var(--err);
+  color: var(--err);
+}
 
 .ff-note {
   color: var(--muted);

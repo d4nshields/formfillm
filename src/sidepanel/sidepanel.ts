@@ -98,13 +98,11 @@ let profile: Profile;
 let currentView: View = "scan";
 /** When set, the scan view shows a "page changed — re-scan" prompt. */
 let pageChangedNotice: string | null = null;
+/** Last scan/classify failure, shown in the intro so it survives re-render. */
+let scanError: string | null = null;
 
 const viewRoot = () => document.getElementById("view") as HTMLElement;
 const statusRoot = () => document.getElementById("status") as HTMLElement;
-const guidanceText = (msg: string) => {
-  const g = document.getElementById("guidance");
-  if (g) g.textContent = msg;
-};
 
 /** Show the blocking busy overlay (grays out + blocks input) with a message. */
 function showBusy(message: string, sub?: string): void {
@@ -246,19 +244,19 @@ function renderScanView(root: HTMLElement): void {
 }
 
 function renderIntro(root: HTMLElement): void {
+  const hasError = scanError !== null;
   root.append(
     el("div", { class: "ff-actions" }, [
-      button("Scan this page", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
+      button(hasError ? "Try again" : "Scan this page", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
     ]),
   );
   root.append(
     el("div", {
-      class: "ff-guidance",
-      attrs: { id: "guidance", role: "status", "aria-live": "polite" },
-      text:
-        state.fields.length === 0
-          ? "Click “Scan this page”. formfillm looks at the form, then walks you through each thing it asks for — one at a time — and explains it before anything is filled."
-          : `Found ${state.fields.length} field(s). Classifying with the local model…`,
+      class: "ff-guidance" + (hasError ? " ff-guidance-error" : ""),
+      attrs: { id: "guidance", role: hasError ? "alert" : "status", "aria-live": "polite" },
+      text: hasError
+        ? (scanError ?? "")
+        : "Click “Scan this page”. formfillm looks at the form, then walks you through each thing it asks for — one at a time — and explains it before anything is filled.",
     }),
   );
 }
@@ -632,6 +630,7 @@ function resetScanSession(): void {
   state.ledgerCommitted = false;
   state.guidedIndex = 0;
   state.stage = "idle";
+  scanError = null;
 }
 
 /**
@@ -681,7 +680,8 @@ async function doScan(): Promise<void> {
   render();
 
   if (tabId === null) {
-    guidanceText("Could not find the active tab.");
+    scanError = "Could not find the active tab.";
+    render();
     return;
   }
   debugLog("panel", "sending ScanPage for tabId", tabId);
@@ -689,8 +689,10 @@ async function doScan(): Promise<void> {
   showBusy("Scanning the page…", "Looking for form fields.");
   try {
     const scan = await sendBg<ScanPageResponse>({ type: MSG.ScanPage, tabId });
+    // If the page changed mid-scan, the modal owns the view — don't fight it.
+    if (pageChangedNotice !== null || state.tabId !== tabId) return;
     if (!scan.ok || !scan.fields || !scan.page) {
-      guidanceText(scan.error ?? "Scan failed.");
+      scanError = scan.error ?? "Scan failed.";
       return;
     }
     state.fields = scan.fields;
@@ -705,16 +707,20 @@ async function doScan(): Promise<void> {
       fields: scan.fields,
       page: scan.page,
     });
+    if (pageChangedNotice !== null || state.tabId !== tabId) return;
     if (!classify.ok || !classify.classifications) {
-      guidanceText(classify.error ?? "Classification failed. Fields default to manual review.");
+      scanError = classify.error ?? "The local model could not classify this form. Check that Ollama is running and reachable (Settings → Test Ollama connection), then try again.";
+      debugLog("panel", "classify failed", { error: classify.error, errors: classify.errors });
       return;
     }
     for (const c of classify.classifications) state.classifications.set(c.fieldId, c);
     // Enter the guided wizard at the first field.
     state.stage = "guided";
     state.guidedIndex = 0;
+    if (classify.errors?.length) debugLog("panel", "classify warnings", classify.errors);
   } catch (e) {
-    guidanceText(e instanceof Error ? e.message : "Something went wrong during scan.");
+    scanError = e instanceof Error ? e.message : "Something went wrong during scan.";
+    debugLog("panel", "scan threw", e);
   } finally {
     hideBusy();
     render();
