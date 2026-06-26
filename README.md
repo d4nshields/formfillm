@@ -19,22 +19,31 @@ formfillm is a Manifest V3 Chrome extension that helps you fill web forms — bu
 
 ### 1. Install and run Ollama (local)
 
-Install Ollama from <https://ollama.com>, then pull the recommended model.
+Install Ollama from <https://ollama.com>, then pull a model.
 
-The recommended model is pinned for reproducibility and chosen to **fully fit an NVIDIA RTX 4060 (8 GB VRAM)** development machine:
+**`qwen3.5:4b` is the recommended _minimum_** — pin it when GPU VRAM is limited to ~8 GB. It is the pinned default for reproducibility and fully fits an 8 GB card (e.g. an NVIDIA RTX 4060):
 
 ```bash
 ollama pull qwen3.5:4b
 ```
 
-Optional alternatives:
+If you have more VRAM, **larger, higher-performing models are fully usable** and give better classification quality — pick the biggest that fits your card. Roughly:
+
+| GPU VRAM | Suggested model | Notes |
+|----------|-----------------|-------|
+| ≤ 6 GB | `qwen3.5:2b` | Smallest / fastest fallback. |
+| **~8 GB (minimum)** | **`qwen3.5:4b`** | **Default.** Fully on-GPU, fast. |
+| ~12 GB | `qwen3.5:9b` | Higher quality (~8.8 GB; needs >8 GB to stay on-GPU). |
+| 16 GB+ | larger `qwen3.5` variants (14B / 32B…) | Best quality; slower per call. |
+| any | `qwen2.5:7b` | Legacy non-reasoning fallback. |
 
 ```bash
-ollama pull qwen3.5:2b      # smaller / fastest, low-end fallback
+ollama pull qwen3.5:2b      # smaller / fastest
+ollama pull qwen3.5:9b      # higher quality, needs >8 GB VRAM
 ollama pull qwen2.5:7b      # legacy fallback
-ollama pull qwen3.5:9b      # higher quality, but ~8.8 GB — partially CPU-offloaded
-                            # on an 8 GB GPU (slower); prefer a card with more VRAM
 ```
+
+These sizes are a guide, not a hard rule — Ollama can't report your total VRAM, but **Settings → Test Ollama connection** measures the real GPU/CPU split for whatever you load (from `/api/ps`), so you can confirm a model actually fits before relying on it. Anything that shows time on CPU there will be slower.
 
 Confirm your local models and API:
 
@@ -131,7 +140,7 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full design and [SECU
 Open **Settings** in the side panel:
 
 - **Ollama base URL** — default `http://127.0.0.1:11434`. Only localhost addresses on port 11434 are accepted.
-- **Model** — default `qwen3.5:4b` (fits an 8 GB GPU). The UI warns when a model is likely too large for an 8 GB GPU (e.g. `qwen3.5:27b`, `qwen3.5:35b`, `qwen3.5:122b`) and **rejects** cloud model names (e.g. `qwen3.5:cloud`).
+- **Model** — default `qwen3.5:4b`, the recommended minimum for ~8 GB VRAM. Larger, higher-performing models are fully usable if your GPU has the VRAM (see the model table above). The UI flags very large models as possibly slow/CPU-offloaded (e.g. `qwen3.5:27b`, `qwen3.5:35b`, `qwen3.5:122b`) and **rejects** cloud model names (e.g. `qwen3.5:cloud`).
 - **Temperature** — default `0` for consistent classification.
 - **Local-only enforcement** — locked on for this MVP.
 - **JSON-schema output** — on by default; falls back to robust JSON extraction + retry if the model doesn't honor it.
