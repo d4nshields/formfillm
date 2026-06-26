@@ -75,7 +75,7 @@ npm run build      # outputs dist/
 3. Click **Scan this page**.
 4. formfillm walks you through the form **one field at a time** ("Field 2 of 6"). For each field it shows a plain-language explanation, the sensitivity, and — when you have a matching saved value — exactly what it would fill.
 5. For each field choose: **Yes, fill it** (fills that field immediately and moves on), **Edit** / **Type it in** (enter or override the value, then fill), **Skip**, or **This looks wrong**. Secret fields (SIN/SSN, etc.) are shown but never filled. **New-password fields** offer **Generate strong password** — formfillm reads the site's rules, generates a compliant password locally, fills it (and any confirm field), and shows it with a **Copy** button so you can save it in your password manager. Make sure your manager saves it on submit; formfillm never stores it.
-6. Use **Back / Next** to move around; at the end you get a **summary** of what was filled, skipped, and flagged.
+6. Use **Back / Next** to move around — or **click any field directly on the page** and the wizard jumps straight to that field's step. At the end you get a **summary** of what was filled, skipped, and flagged.
 7. Review the filled values on the page and submit the form yourself — formfillm never submits.
 
 Open **Review profile** first to enter your data (or **Create demo profile** for fake values to test with). A value-free record of your decisions is kept in **Disclosure ledger**.

@@ -17,6 +17,7 @@ export const MSG = {
   RemoveOverlay: "formfillm/remove_overlay",
   PasswordContext: "formfillm/password_context",
   ParsePasswordPolicy: "formfillm/parse_password_policy",
+  FieldFocused: "formfillm/field_focused",
   Ping: "formfillm/ping",
 } as const;
 
@@ -94,6 +95,15 @@ export interface ParsePasswordPolicyRequest {
   type: typeof MSG.ParsePasswordPolicy;
   context: PasswordContext;
 }
+/**
+ * Broadcast by the content script when the user focuses or clicks a previously
+ * scanned field on the page. The side panel uses it to jump the guided wizard
+ * to the matching step. Carries only the opaque scan-time field id — no value.
+ */
+export interface FieldFocusedRequest {
+  type: typeof MSG.FieldFocused;
+  fieldId: string;
+}
 export interface PingRequest {
   type: typeof MSG.Ping;
 }
@@ -107,6 +117,7 @@ export type Message =
   | RemoveOverlayRequest
   | PasswordContextRequest
   | ParsePasswordPolicyRequest
+  | FieldFocusedRequest
   | PingRequest;
 
 // --- Responses --------------------------------------------------------------
@@ -212,6 +223,10 @@ export function parseMessage(raw: unknown): Message | null {
         return null;
       }
       return { type, context: raw.context as unknown as PasswordContext };
+    }
+    case MSG.FieldFocused: {
+      if (typeof raw.fieldId !== "string") return null;
+      return { type, fieldId: raw.fieldId };
     }
   }
 }

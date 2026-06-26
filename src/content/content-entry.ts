@@ -27,14 +27,58 @@ interface ContentGlobal {
 
 const g = window as unknown as ContentGlobal;
 
+// Tracks the last field id we told the side panel about, so click + focusin on
+// the same field don't double-report. Reset on each scan.
+let lastFocusFieldId: string | null = null;
+// While we're programmatically filling, the focus we trigger must NOT be
+// reported back as a user selection (that would yank the wizard backwards).
+let suppressFocusReporting = false;
+
 function pageContext() {
   return { origin: location.origin, title: document.title || null };
+}
+
+/** Find which scanned field, if any, owns the given event target. */
+function fieldIdForTarget(target: EventTarget | null): string | null {
+  if (!(target instanceof Element)) return null;
+  const refs = g.__formfillmRefs;
+  if (!refs || refs.size === 0) return null;
+  for (const [fieldId, ref] of refs) {
+    if (ref.primary === target || ref.primary.contains(target)) return fieldId;
+    if (ref.els.some((e) => e === target || e.contains(target))) return fieldId;
+    if (ref.options?.some((o) => o.el && (o.el === target || o.el.contains(target)))) return fieldId;
+  }
+  return null;
+}
+
+/** Report a user-driven field selection so the side panel can jump to its step. */
+function reportFieldSelection(target: EventTarget | null): void {
+  if (suppressFocusReporting) return;
+  const fieldId = fieldIdForTarget(target);
+  if (!fieldId || fieldId === lastFocusFieldId) return;
+  lastFocusFieldId = fieldId;
+  debugLog("fill", "user selected field on page", fieldId);
+  void chrome.runtime.sendMessage({ type: MSG.FieldFocused, fieldId }).catch(() => undefined);
+}
+
+/** Briefly ignore focus we cause ourselves (e.g. when filling a field). */
+function suppressSelfFocus(): void {
+  suppressFocusReporting = true;
+  window.setTimeout(() => {
+    suppressFocusReporting = false;
+  }, 400);
 }
 
 function init(): void {
   if (g.__formfillmInitialized) return;
   g.__formfillmInitialized = true;
   g.__formfillmRefs = new Map();
+
+  // When the user picks a field on the page, tell the side panel so its guided
+  // wizard can jump to that field. Delegated + capture so it works for fields
+  // added after load and for clicks on non-focusable ARIA widgets.
+  document.addEventListener("focusin", (e) => reportFieldSelection(e.target), true);
+  document.addEventListener("click", (e) => reportFieldSelection(e.target), true);
 
   chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
     const msg = parseMessage(raw);
@@ -52,6 +96,7 @@ function init(): void {
         try {
           const { fields, refs } = scanFields();
           g.__formfillmRefs = refs;
+          lastFocusFieldId = null;
           mountOverlay();
           setOverlayStatus(`Scanned ${fields.length} field${fields.length === 1 ? "" : "s"}.`);
           const res: ScanPageResponse = { ok: true, fields, page: pageContext() };
@@ -68,6 +113,9 @@ function init(): void {
           requested: msg.fills.map((f) => f.fieldId),
           knownRefs: refs.size,
         });
+        // Filling focuses the field; don't let that echo back as a user
+        // selection and pull the wizard backwards.
+        suppressSelfFocus();
         applyFills(refs, msg.fills)
           .then((results) => {
             debugLog("fill", "fill results", results);
@@ -99,6 +147,10 @@ function init(): void {
       case MSG.RemoveOverlay:
         removeOverlay();
         sendResponse({ ok: true });
+        return false;
+
+      case MSG.FieldFocused:
+        // Outbound only (content → side panel); never received here.
         return false;
 
       case MSG.Classify:

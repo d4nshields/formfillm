@@ -456,5 +456,9 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
     case MSG.ParsePasswordPolicy:
       handleParsePasswordPolicy(msg.context).then(sendResponse);
       return true;
+
+    case MSG.FieldFocused:
+      // A page→side-panel signal; the worker is not involved. Ignore quietly.
+      return false;
   }
 });

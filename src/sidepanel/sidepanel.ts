@@ -10,6 +10,7 @@
 
 import {
   MSG,
+  parseMessage,
   type ApplyFillResponse,
   type ClassifyResponse,
   type FillInstruction,
@@ -1068,11 +1069,43 @@ function wireNav(): void {
   }
 }
 
+/**
+ * Jump the guided wizard to the field the user just selected on the page.
+ * No-op unless a guided session exists for the active tab and that field was
+ * part of the scan. Does not interrupt an in-flight password generation.
+ */
+function jumpToField(fieldId: string): void {
+  if (state.fields.length === 0 || state.stage === "idle") return;
+  if (state.generating !== null) return;
+  const idx = state.fields.findIndex((f) => f.fieldId === fieldId);
+  if (idx < 0) return;
+  if (state.stage === "guided" && state.guidedIndex === idx && currentView === "scan") return;
+  debugLog("panel", "jump to field from page selection", { fieldId, idx });
+  state.stage = "guided";
+  state.guidedIndex = idx;
+  state.editing = null;
+  if (currentView === "scan") render();
+  else setView("scan");
+}
+
+/** Listen for page field selections relayed from the content script. */
+function wireFieldFocusJump(): void {
+  chrome.runtime.onMessage.addListener((raw, sender) => {
+    const msg = parseMessage(raw);
+    if (!msg || msg.type !== MSG.FieldFocused) return false;
+    // Only honor selections from the tab this session is bound to.
+    if (state.tabId === null || sender.tab?.id !== state.tabId) return false;
+    jumpToField(msg.fieldId);
+    return false;
+  });
+}
+
 async function main(): Promise<void> {
   settings = await getSettings();
   profile = await getProfile();
   state.tabId = await activeTabId();
   wireNav();
+  wireFieldFocusJump();
   await refreshStatus();
   setView("scan");
 }
