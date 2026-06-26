@@ -4,14 +4,14 @@
 
 formfillm is a Manifest V3 Chrome extension that helps you fill web forms — but it is **not** a one-click autofill tool. It is a *local disclosure assistant*. It scans a form only when you ask, uses a **locally running [Ollama](https://ollama.com) model** to classify and explain what each field is asking for, and fills **only the fields you explicitly approve**. Your personal data never leaves your machine, and is never sent to the model.
 
-- 🔒 **Local only.** No cloud LLMs, no hosted APIs, no telemetry, no analytics, no remote logging, no CDN scripts, no external fonts.
-- 🧠 **Metadata-only classification.** The model sees form field *labels and structure*, never your stored profile values.
-- ✅ **Consent per field.** Approve, edit, skip, or mark-wrong each field. Secrets (passwords, SIN/SSN, 2FA, banking) are never filled.
-- 📒 **Disclosure ledger.** Records *categories and decisions* — never actual values.
-- 🔑 **Local password generation.** For sign-up forms it can generate a strong password (Web Crypto CSPRNG) that meets the site's stated rules, fill it, and hand off to your password manager — the password is shown, copyable, and **never stored** by formfillm.
-- 🚫 **Never submits.** formfillm fills fields and highlights them; you review and submit yourself.
+- **Local only.** No cloud LLMs, no hosted APIs, no telemetry, no analytics, no remote logging, no CDN scripts, no external fonts.
+- **Metadata-only classification.** The model sees form field *labels and structure*, never your stored profile values.
+- **Consent per field.** Approve, edit, skip, or mark-wrong each field. Secrets (passwords, SIN/SSN, 2FA, banking) are never filled.
+- **Disclosure ledger.** Records *categories and decisions* — never actual values.
+- **Local password generation.** For sign-up forms it can generate a strong password (Web Crypto CSPRNG) that meets the site's stated rules, fill it, and hand off to your password manager — the password is shown, copyable, and **never stored** by formfillm.
+- **Never submits.** formfillm fills fields and highlights them; you review and submit yourself.
 
-> ⚠️ **MVP status.** Profile data is stored unencrypted in `chrome.storage.local`. Do not store secrets in your profile. See [SECURITY.md](./SECURITY.md).
+> **MVP status.** Profile data is stored unencrypted in `chrome.storage.local`. Do not store secrets in your profile. See [SECURITY.md](./SECURITY.md).
 
 ---
 
