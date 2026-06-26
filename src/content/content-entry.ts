@@ -18,6 +18,7 @@ import { scanFields, type FieldRef } from "./scanner.js";
 import { applyFills, highlightField } from "./filler.js";
 import { getPasswordContext } from "./password-context.js";
 import { mountOverlay, removeOverlay, setOverlayStatus } from "./overlay.js";
+import { debugLog } from "../shared/debug-consts.js";
 
 interface ContentGlobal {
   __formfillmInitialized?: boolean;
@@ -63,13 +64,13 @@ function init(): void {
 
       case MSG.ApplyFill: {
         const refs = g.__formfillmRefs ?? new Map<string, FieldRef>();
-        console.log("[formfillm:content] ApplyFill received", {
+        debugLog("fill", "ApplyFill received", {
           requested: msg.fills.map((f) => f.fieldId),
           knownRefs: refs.size,
         });
         applyFills(refs, msg.fills)
           .then((results) => {
-            console.log("[formfillm:content] fill results", results);
+            debugLog("fill", "fill results", results);
             const filled = results.filter((r) => r.filled).length;
             setOverlayStatus(`Filled ${filled} of ${results.length} approved field${results.length === 1 ? "" : "s"}.`);
             const res: ApplyFillResponse = { ok: true, results };

@@ -94,6 +94,13 @@ Open **Review profile** first to enter your data (or **Create demo profile** for
 
 To regenerate the icons: `node scripts/make-icons.mjs`.
 
+**Debugging:** console logging is off by default and gated per channel in
+`src/shared/debug-consts.ts`. Flip an individual flag to `true` and rebuild to
+enable just that category — e.g. `ollamaNetwork` (Ollama requests/responses/
+timing in the service worker console), `messaging` (gesture/injection/routing),
+`fill` (page console), or `panel` (side panel console). These flags control
+logging only; none changes behavior or enables any network access.
+
 ---
 
 ## How it works (privacy flow)

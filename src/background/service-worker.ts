@@ -41,6 +41,7 @@ import { reconcileClassification } from "../shared/sensitivity.js";
 import { sanitizeFieldsForModel } from "../shared/sanitize.js";
 import { validateModelName, validateOllamaUrl } from "../shared/ollama-policy.js";
 import { mergePolicyExtraction, PASSWORD_POLICY_SCHEMA, policyFromAttributes } from "../shared/password.js";
+import { debugLog } from "../shared/debug-consts.js";
 import { DEFAULT_SETTINGS, STORAGE_KEYS, type Settings } from "../shared/types.js";
 
 // Cold model loads (especially when partly CPU-offloaded) can take a while,
@@ -49,12 +50,11 @@ const OLLAMA_TIMEOUT_MS = 120_000;
 // Keep the model resident between calls to avoid repeated cold-load latency.
 const OLLAMA_KEEP_ALIVE = "30m";
 
-// Diagnostics. Logs appear in the SERVICE WORKER console:
-// chrome://extensions → formfillm → "Inspect views: service worker".
-const DEBUG = true;
-function log(...args: unknown[]): void {
-  if (DEBUG) console.log("[formfillm:bg]", ...args);
-}
+// Diagnostics, gated per channel in shared/debug-consts.ts. Logs appear in the
+// SERVICE WORKER console: chrome://extensions → formfillm → "Inspect views:
+// service worker". `log` = messaging/gesture/injection; `olog` = Ollama network.
+const log = (...args: unknown[]): void => debugLog("messaging", ...args);
+const olog = (...args: unknown[]): void => debugLog("ollamaNetwork", ...args);
 
 // Tabs for which the user invoked the formfillm action icon (which grants
 // activeTab). This is purely a diagnostic/UX signal — the real permission is
@@ -138,7 +138,7 @@ async function ollamaChat(
   const format = forceJsonString ? "json" : opts.jsonSchemaMode ? schema : "json";
 
   const startedAt = Date.now();
-  log("ollamaChat → request", {
+  olog("ollamaChat → request", {
     model: opts.model,
     format: typeof format === "string" ? format : "json-schema",
     promptChars: system.length + user.length,
@@ -146,7 +146,7 @@ async function ollamaChat(
 
   const controller = new AbortController();
   const timer = setTimeout(() => {
-    log("ollamaChat ✗ aborting after timeout", { ms: OLLAMA_TIMEOUT_MS });
+    olog("ollamaChat ✗ aborting after timeout", { ms: OLLAMA_TIMEOUT_MS });
     controller.abort();
   }, OLLAMA_TIMEOUT_MS);
   let resp: Response;
@@ -186,7 +186,7 @@ async function ollamaChat(
     throw new Error(`Ollama returned ${resp.status}: ${text.slice(0, 200)}`);
   }
 
-  log("ollamaChat ← response", { status: resp.status, ms: Date.now() - startedAt });
+  olog("ollamaChat ← response", { status: resp.status, ms: Date.now() - startedAt });
 
   const data = (await resp.json()) as { message?: { content?: string } };
   const content = data?.message?.content;
@@ -212,7 +212,7 @@ async function handleClassify(
   // Defense in depth: sanitize again in case anything reached us unsanitized.
   const safeFields = sanitizeFieldsForModel(fields);
   const knownIds = safeFields.map((f) => f.fieldId);
-  log("classify start", {
+  olog("classify start", {
     model: settings.model,
     baseUrl: url.normalized,
     jsonSchemaMode: settings.jsonSchemaMode,
@@ -320,7 +320,7 @@ async function handleParsePasswordPolicy(context: PasswordContext): Promise<Pars
     }
     return { ok: true, policy: mergePolicyExtraction(base, parsed) };
   } catch (e) {
-    log("password policy extraction failed; using attribute baseline", e);
+    olog("password policy extraction failed; using attribute baseline", e);
     return { ok: true, policy: base };
   }
 }
