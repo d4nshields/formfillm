@@ -133,7 +133,7 @@ Open **Settings** in the side panel:
 - **Temperature** — default `0` for consistent classification.
 - **Local-only enforcement** — locked on for this MVP.
 - **JSON-schema output** — on by default; falls back to robust JSON extraction + retry if the model doesn't honor it.
-- **Test Ollama connection** — lists locally installed models; click a model to select it.
+- **Test Ollama connection** — lists locally installed models (click one to select it) and shows the **measured GPU/CPU split** for any currently-loaded model, read from Ollama's `/api/ps`. Ollama exposes no total-VRAM/hardware endpoint, so fit is measured from a real load rather than assumed — a model that shows time on CPU is what makes generation slow.
 
 ---
 

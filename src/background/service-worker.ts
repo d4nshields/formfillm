@@ -19,6 +19,7 @@ import {
   parseMessage,
   type ApplyFillResponse,
   type ClassifyResponse,
+  type LoadedModelInfo,
   type Message,
   type ParsePasswordPolicyResponse,
   type PasswordContext,
@@ -251,6 +252,29 @@ async function handleClassify(
   return { ok: true, classifications: reconciled, ...(allErrors.length ? { errors: allErrors } : {}) };
 }
 
+/**
+ * Read which models are loaded right now and how much of each sits in GPU VRAM
+ * (Ollama /api/ps). This is the only reliable fit signal Ollama exposes — there
+ * is no hardware/total-VRAM endpoint. Best-effort: returns [] on any failure.
+ */
+async function getLoadedModels(baseUrl: string): Promise<LoadedModelInfo[]> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    const resp = await fetch(`${baseUrl}/api/ps`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as {
+      models?: Array<{ name?: string; size?: number; size_vram?: number }>;
+    };
+    return (data.models ?? [])
+      .filter((m): m is { name: string; size?: number; size_vram?: number } => typeof m.name === "string")
+      .map((m) => ({ name: m.name, size: Number(m.size ?? 0), sizeVram: Number(m.size_vram ?? 0) }));
+  } catch {
+    return [];
+  }
+}
+
 async function handleTestOllama(): Promise<TestOllamaResponse> {
   const settings = await getSettings();
   const url = validateOllamaUrl(settings.ollamaBaseUrl);
@@ -268,7 +292,8 @@ async function handleTestOllama(): Promise<TestOllamaResponse> {
     const models = (data.models ?? [])
       .map((m) => m.name)
       .filter((n): n is string => typeof n === "string");
-    return { ok: true, reachable: true, models, current: settings.model };
+    const loaded = await getLoadedModels(url.normalized);
+    return { ok: true, reachable: true, models, loaded, current: settings.model };
   } catch (e) {
     return {
       ok: false,

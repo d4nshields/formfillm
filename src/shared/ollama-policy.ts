@@ -190,7 +190,7 @@ export function assessModel(raw: string): ModelAssessment {
       cloudRejected: false,
       fit: "large",
       paramBillions,
-      warning: `"${name}" is not recommended for this machine (RTX 4060, 8 GB). It will likely be slow or partially CPU-offloaded.`,
+      warning: `"${name}" is not recommended by default — large models are often partially CPU-offloaded on smaller GPUs (slow). Load it and check the measured GPU/CPU split.`,
     };
   }
 
@@ -212,9 +212,42 @@ export function assessModel(raw: string): ModelAssessment {
       cloudRejected: false,
       fit: "large",
       paramBillions,
-      warning: `"${name}" (~${paramBillions}B params) is likely too large for an 8 GB GPU and may be slow or CPU-offloaded.`,
+      warning: `"${name}" (~${paramBillions}B params) is large and may be partially CPU-offloaded (slow) unless your GPU has enough VRAM. Load it to measure the GPU/CPU split.`,
     };
   }
 
   return { cloudRejected: false, fit: "supported", paramBillions, warning: null };
+}
+
+// ---------------------------------------------------------------------------
+// Measured VRAM fit (from Ollama /api/ps) — the real signal, no assumptions.
+// ---------------------------------------------------------------------------
+
+export interface VramFit {
+  /** Fraction of the loaded model resident OUTSIDE the GPU (0 = fully on GPU). */
+  offloadFraction: number;
+  fullyOnGpu: boolean;
+  /** Short UI label, e.g. "Fully on GPU — fast" or "23% on CPU — slower". */
+  label: string;
+  severity: "ok" | "warn" | "unknown";
+}
+
+/**
+ * Assess how a *loaded* model actually fits, from Ollama's /api/ps figures:
+ * `size` is the total loaded footprint (weights + KV/context buffers) and
+ * `sizeVram` the bytes resident in the GPU. This is measured truth — Ollama
+ * exposes no total-VRAM/hardware endpoint, but anything offloaded to CPU here
+ * is exactly what makes generation slow.
+ */
+export function assessVramFit(size: number, sizeVram: number): VramFit {
+  if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(sizeVram) || sizeVram < 0) {
+    return { offloadFraction: 0, fullyOnGpu: false, label: "Fit unknown", severity: "unknown" };
+  }
+  const onGpu = Math.min(sizeVram, size);
+  const offloadFraction = Math.max(0, 1 - onGpu / size);
+  const pct = Math.round(offloadFraction * 100);
+  if (pct <= 0) {
+    return { offloadFraction: 0, fullyOnGpu: true, label: "Fully on GPU — fast", severity: "ok" };
+  }
+  return { offloadFraction, fullyOnGpu: false, label: `${pct}% on CPU — slower`, severity: "warn" };
 }

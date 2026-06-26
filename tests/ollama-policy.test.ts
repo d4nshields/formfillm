@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assessModel,
+  assessVramFit,
   FALLBACK_MODELS,
   getModelParamBillions,
   RECOMMENDED_MODEL,
@@ -112,5 +113,34 @@ describe("assessModel recommendations", () => {
   it("flags cloud models as rejected", () => {
     const a = assessModel("qwen3.5:cloud");
     expect(a.cloudRejected).toBe(true);
+  });
+});
+
+describe("assessVramFit (measured from /api/ps)", () => {
+  it("reports fully on GPU when size_vram equals size", () => {
+    const f = assessVramFit(5918775296, 5918775296);
+    expect(f.fullyOnGpu).toBe(true);
+    expect(f.offloadFraction).toBe(0);
+    expect(f.severity).toBe("ok");
+    expect(f.label).toMatch(/GPU/i);
+  });
+
+  it("reports CPU offload percentage when partially resident", () => {
+    const f = assessVramFit(1000, 750); // 25% on CPU
+    expect(f.fullyOnGpu).toBe(false);
+    expect(Math.round(f.offloadFraction * 100)).toBe(25);
+    expect(f.severity).toBe("warn");
+    expect(f.label).toMatch(/25% on CPU/);
+  });
+
+  it("treats vram above size as fully on GPU (no negative offload)", () => {
+    const f = assessVramFit(1000, 1200);
+    expect(f.offloadFraction).toBe(0);
+    expect(f.fullyOnGpu).toBe(true);
+  });
+
+  it("returns unknown for missing/invalid figures", () => {
+    expect(assessVramFit(0, 0).severity).toBe("unknown");
+    expect(assessVramFit(NaN, 10).severity).toBe("unknown");
   });
 });
