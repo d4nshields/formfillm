@@ -102,6 +102,21 @@ const guidanceText = (msg: string) => {
   if (g) g.textContent = msg;
 };
 
+/** Show the blocking busy overlay (grays out + blocks input) with a message. */
+function showBusy(message: string, sub?: string): void {
+  const busy = document.getElementById("busy");
+  const msg = document.getElementById("busy-msg");
+  const subEl = document.querySelector(".ff-busy-sub");
+  if (msg) msg.textContent = message;
+  if (subEl && sub !== undefined) subEl.textContent = sub;
+  if (busy) busy.hidden = false;
+}
+
+function hideBusy(): void {
+  const busy = document.getElementById("busy");
+  if (busy) busy.hidden = true;
+}
+
 function sendBg<T>(message: object): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
 }
@@ -463,57 +478,60 @@ async function generatePasswordFor(field: FieldMetadata): Promise<void> {
     return;
   }
   state.generating = field.fieldId;
-  render();
+  showBusy("Generating a strong password…", "Reading this site's rules with your local model.");
+  try {
+    // 1) Read live constraints + policy text from the page.
+    const ctxRes = await sendBg<PasswordContextResponse>({
+      type: MSG.PasswordContext,
+      tabId: state.tabId,
+      fieldId: field.fieldId,
+    }).catch(() => ({ ok: false }) as PasswordContextResponse);
+    const context = ctxRes.context ?? {
+      fieldId: field.fieldId,
+      minLength: null,
+      maxLength: null,
+      pattern: null,
+      policyText: null,
+      confirmFieldId: null,
+    };
 
-  // 1) Read live constraints + policy text from the page.
-  const ctxRes = await sendBg<PasswordContextResponse>({
-    type: MSG.PasswordContext,
-    tabId: state.tabId,
-    fieldId: field.fieldId,
-  }).catch(() => ({ ok: false }) as PasswordContextResponse);
-  const context = ctxRes.context ?? {
-    fieldId: field.fieldId,
-    minLength: null,
-    maxLength: null,
-    pattern: null,
-    policyText: null,
-    confirmFieldId: null,
-  };
+    // 2) Extract a structured policy (local LLM, fail-closed to attributes).
+    const polRes = await sendBg<ParsePasswordPolicyResponse>({
+      type: MSG.ParsePasswordPolicy,
+      context,
+    }).catch(() => ({ ok: false }) as ParsePasswordPolicyResponse);
+    const policy = (polRes.policy as PasswordPolicy | undefined) ?? DEFAULT_PASSWORD_POLICY;
 
-  // 2) Extract a structured policy (local LLM, fail-closed to attributes).
-  const polRes = await sendBg<ParsePasswordPolicyResponse>({
-    type: MSG.ParsePasswordPolicy,
-    context,
-  }).catch(() => ({ ok: false }) as ParsePasswordPolicyResponse);
-  const policy = (polRes.policy as PasswordPolicy | undefined) ?? DEFAULT_PASSWORD_POLICY;
+    // 3) Generate locally, avoiding the user's name/email.
+    const { password } = generatePassword(policy, passwordAvoidList());
 
-  // 3) Generate locally, avoiding the user's name/email.
-  const { password } = generatePassword(policy, passwordAvoidList());
-
-  // 4) Fill the password field (and a confirm field, if any).
-  const fills: FillInstruction[] = [{ fieldId: field.fieldId, value: password, allowSecret: true }];
-  if (context.confirmFieldId) {
-    fills.push({ fieldId: context.confirmFieldId, value: password, allowSecret: true });
-  }
-  const fillRes = await sendBg<ApplyFillResponse>({ type: MSG.ApplyFill, tabId: state.tabId, fills }).catch(
-    () => ({ ok: false }) as ApplyFillResponse,
-  );
-  const filled = Boolean(fillRes.results?.some((r) => r.fieldId === field.fieldId && r.filled));
-
-  // 5) Record (in memory only) — never persisted.
-  state.generatedPasswords.set(field.fieldId, password);
-  state.decisions.set(field.fieldId, "generated");
-  state.fillResults.set(field.fieldId, filled);
-  if (context.confirmFieldId) {
-    state.generatedPasswords.set(context.confirmFieldId, password);
-    state.decisions.set(context.confirmFieldId, "generated");
-    state.fillResults.set(
-      context.confirmFieldId,
-      Boolean(fillRes.results?.some((r) => r.fieldId === context.confirmFieldId && r.filled)),
+    // 4) Fill the password field (and a confirm field, if any).
+    const fills: FillInstruction[] = [{ fieldId: field.fieldId, value: password, allowSecret: true }];
+    if (context.confirmFieldId) {
+      fills.push({ fieldId: context.confirmFieldId, value: password, allowSecret: true });
+    }
+    const fillRes = await sendBg<ApplyFillResponse>({ type: MSG.ApplyFill, tabId: state.tabId, fills }).catch(
+      () => ({ ok: false }) as ApplyFillResponse,
     );
+    const filled = Boolean(fillRes.results?.some((r) => r.fieldId === field.fieldId && r.filled));
+
+    // 5) Record (in memory only) — never persisted.
+    state.generatedPasswords.set(field.fieldId, password);
+    state.decisions.set(field.fieldId, "generated");
+    state.fillResults.set(field.fieldId, filled);
+    if (context.confirmFieldId) {
+      state.generatedPasswords.set(context.confirmFieldId, password);
+      state.decisions.set(context.confirmFieldId, "generated");
+      state.fillResults.set(
+        context.confirmFieldId,
+        Boolean(fillRes.results?.some((r) => r.fieldId === context.confirmFieldId && r.filled)),
+      );
+    }
+  } finally {
+    state.generating = null;
+    hideBusy();
+    render();
   }
-  state.generating = null;
-  render();
 }
 
 async function fillCurrentField(field: FieldMetadata, value: string): Promise<boolean> {
@@ -573,24 +591,13 @@ async function highlight(fieldId: string | null): Promise<void> {
 }
 
 async function doScan(): Promise<void> {
-  guidanceText("Scanning…");
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   debugLog("panel", "active tab query →", { id: tab?.id, url: tab?.url, title: tab?.title });
   const tabId = tab?.id ?? null;
-  if (tabId === null) {
-    guidanceText("Could not find the active tab.");
-    return;
-  }
-  state.tabId = tabId;
-  debugLog("panel", "sending ScanPage for tabId", tabId);
 
-  const scan = await sendBg<ScanPageResponse>({ type: MSG.ScanPage, tabId });
-  if (!scan.ok || !scan.fields || !scan.page) {
-    guidanceText(scan.error ?? "Scan failed.");
-    return;
-  }
-  state.fields = scan.fields;
-  state.page = scan.page;
+  // Reset session state and show the intro so status/errors have a home.
+  state.tabId = tabId;
+  state.fields = [];
   state.classifications = new Map();
   state.decisions = new Map();
   state.editedValues = new Map();
@@ -601,24 +608,47 @@ async function doScan(): Promise<void> {
   state.ledgerCommitted = false;
   state.guidedIndex = 0;
   state.stage = "idle";
-
-  guidanceText(`Found ${scan.fields.length} field(s). Classifying with the local model…`);
   render();
 
-  const classify = await sendBg<ClassifyResponse>({
-    type: MSG.Classify,
-    fields: scan.fields,
-    page: scan.page,
-  });
-  if (!classify.ok || !classify.classifications) {
-    guidanceText(classify.error ?? "Classification failed. Fields default to manual review.");
+  if (tabId === null) {
+    guidanceText("Could not find the active tab.");
     return;
   }
-  for (const c of classify.classifications) state.classifications.set(c.fieldId, c);
-  // Enter the guided wizard at the first field.
-  state.stage = "guided";
-  state.guidedIndex = 0;
-  render();
+  debugLog("panel", "sending ScanPage for tabId", tabId);
+
+  showBusy("Scanning the page…", "Looking for form fields.");
+  try {
+    const scan = await sendBg<ScanPageResponse>({ type: MSG.ScanPage, tabId });
+    if (!scan.ok || !scan.fields || !scan.page) {
+      guidanceText(scan.error ?? "Scan failed.");
+      return;
+    }
+    state.fields = scan.fields;
+    state.page = scan.page;
+
+    showBusy(
+      `Reading ${scan.fields.length} field(s) with your local model…`,
+      "This can take several seconds depending on your hardware.",
+    );
+    const classify = await sendBg<ClassifyResponse>({
+      type: MSG.Classify,
+      fields: scan.fields,
+      page: scan.page,
+    });
+    if (!classify.ok || !classify.classifications) {
+      guidanceText(classify.error ?? "Classification failed. Fields default to manual review.");
+      return;
+    }
+    for (const c of classify.classifications) state.classifications.set(c.fieldId, c);
+    // Enter the guided wizard at the first field.
+    state.stage = "guided";
+    state.guidedIndex = 0;
+  } catch (e) {
+    guidanceText(e instanceof Error ? e.message : "Something went wrong during scan.");
+  } finally {
+    hideBusy();
+    render();
+  }
 }
 
 /**
@@ -950,11 +980,14 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
   // Test connection + model list
   const testResult = el("div", { class: "ff-test-result", attrs: { role: "status", "aria-live": "polite" } });
   const doTest = async () => {
-    testResult.textContent = "Testing…";
     clear(testResult);
-    testResult.append(el("p", { text: "Testing…" }));
-    const res = await sendBg<TestOllamaResponse>({ type: MSG.TestOllama });
-    clear(testResult);
+    showBusy("Testing the Ollama connection…", "Querying installed models.");
+    let res: TestOllamaResponse;
+    try {
+      res = await sendBg<TestOllamaResponse>({ type: MSG.TestOllama });
+    } finally {
+      hideBusy();
+    }
     if (!res.reachable) {
       testResult.append(el("p", { class: "ff-err", text: `Unreachable: ${res.error ?? "unknown error"}` }));
       return;

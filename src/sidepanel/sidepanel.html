@@ -32,6 +32,14 @@
 
     <main id="view" class="ff-view" role="tabpanel" aria-live="polite"></main>
 
+    <div id="busy" class="ff-busy" role="alertdialog" aria-live="assertive" aria-label="Working" hidden>
+      <div class="ff-busy-card">
+        <div class="ff-spinner" aria-hidden="true"></div>
+        <p id="busy-msg" class="ff-busy-msg">Working…</p>
+        <p class="ff-busy-sub">Talking to your local model — this can take several seconds.</p>
+      </div>
+    </div>
+
     <div id="flash" class="ff-flash" role="status" aria-live="polite"></div>
 
     <script type="module" src="sidepanel.js"></script>

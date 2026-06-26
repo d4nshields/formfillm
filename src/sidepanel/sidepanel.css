@@ -518,6 +518,61 @@ h3 {
   color: var(--muted);
 }
 
+/* Busy overlay — grays out and blocks the whole panel during model calls. */
+.ff-busy {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 15, 18, 0.72);
+  backdrop-filter: blur(1px);
+}
+.ff-busy[hidden] {
+  display: none;
+}
+.ff-busy-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-width: 240px;
+  text-align: center;
+}
+.ff-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--teal-bright);
+  animation: ff-spin 0.8s linear infinite;
+}
+@keyframes ff-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ff-spinner {
+    animation-duration: 2s;
+  }
+}
+.ff-busy-msg {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.ff-busy-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .ff-flash {
   position: fixed;
   left: 50%;
