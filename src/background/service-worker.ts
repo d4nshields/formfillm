@@ -131,8 +131,18 @@ async function ollamaChat(
       ? CLASSIFICATION_JSON_SCHEMA
       : "json";
 
+  const startedAt = Date.now();
+  log("ollamaChat → request", {
+    model: opts.model,
+    format: typeof format === "string" ? format : "json-schema",
+    promptChars: system.length + user.length,
+  });
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
+  const timer = setTimeout(() => {
+    log("ollamaChat ✗ aborting after timeout", { ms: OLLAMA_TIMEOUT_MS });
+    controller.abort();
+  }, OLLAMA_TIMEOUT_MS);
   let resp: Response;
   try {
     resp = await fetch(`${opts.baseUrl}/api/chat`, {
@@ -170,6 +180,8 @@ async function ollamaChat(
     throw new Error(`Ollama returned ${resp.status}: ${text.slice(0, 200)}`);
   }
 
+  log("ollamaChat ← response", { status: resp.status, ms: Date.now() - startedAt });
+
   const data = (await resp.json()) as { message?: { content?: string } };
   const content = data?.message?.content;
   if (typeof content !== "string" || content.length === 0) {
@@ -194,6 +206,12 @@ async function handleClassify(
   // Defense in depth: sanitize again in case anything reached us unsanitized.
   const safeFields = sanitizeFieldsForModel(fields);
   const knownIds = safeFields.map((f) => f.fieldId);
+  log("classify start", {
+    model: settings.model,
+    baseUrl: url.normalized,
+    jsonSchemaMode: settings.jsonSchemaMode,
+    fields: knownIds.length,
+  });
   const userPrompt = buildClassificationPrompt(safeFields, {
     origin: page.origin,
     ...(page.title ? { title: page.title } : {}),

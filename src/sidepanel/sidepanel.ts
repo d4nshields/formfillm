@@ -26,7 +26,7 @@ import {
   validateModelName,
   validateOllamaUrl,
 } from "../shared/ollama-policy.js";
-import { isFillable, isLowSensitivityBatchable } from "../shared/sensitivity.js";
+import { isFillable } from "../shared/sensitivity.js";
 import { getProfileValue, resolveProfileKey } from "../shared/profile-keys.js";
 import { buildLedgerEntry } from "../shared/ledger.js";
 import {
@@ -43,6 +43,7 @@ import { button, clear, el } from "./ui.js";
 
 type View = "scan" | "profile" | "ledger" | "settings";
 type Decision = "pending" | "approved" | "edited" | "skipped" | "marked_wrong";
+type ScanStage = "idle" | "guided" | "summary";
 
 interface ReviewState {
   tabId: number | null;
@@ -51,6 +52,15 @@ interface ReviewState {
   classifications: Map<string, FieldClassification>;
   decisions: Map<string, Decision>;
   editedValues: Map<string, string>;
+  /** Per-field fill outcome, recorded as each field is approved. */
+  fillResults: Map<string, boolean>;
+  /** Guided wizard: which field index we are on, and the overall stage. */
+  stage: ScanStage;
+  guidedIndex: number;
+  /** Inline editor open for this field id (guided step), or null. */
+  editing: string | null;
+  /** Whether this session's decisions have been written to the ledger. */
+  ledgerCommitted: boolean;
 }
 
 const state: ReviewState = {
@@ -60,6 +70,11 @@ const state: ReviewState = {
   classifications: new Map(),
   decisions: new Map(),
   editedValues: new Map(),
+  fillResults: new Map(),
+  stage: "idle",
+  guidedIndex: 0,
+  editing: null,
+  ledgerCommitted: false,
 };
 
 let settings: Settings;
@@ -180,164 +195,228 @@ function render(): void {
 // Scan view
 // ---------------------------------------------------------------------------
 
+// The scan view is a guided, one-field-at-a-time wizard aimed at users who
+// want hand-holding: it walks through each detected field, explains it in
+// plain language, and fills each one immediately when the user approves.
 function renderScanView(root: HTMLElement): void {
-  const actions = el("div", { class: "ff-actions" }, [
-    button("Scan this page", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
-  ]);
-  root.append(actions);
-
-  const guidance = el("div", {
-    class: "ff-guidance",
-    attrs: { id: "guidance", role: "status", "aria-live": "polite" },
-    text:
-      state.fields.length === 0
-        ? "Click “Scan this page” to detect form fields. formfillm classifies fields using a local model and explains each requested disclosure before anything is filled."
-        : `Found ${state.fields.length} field(s). Review each disclosure, then approve only what you want filled.`,
-  });
-  root.append(guidance);
-
-  if (state.fields.length === 0) return;
-
-  // Batch actions
-  const batch = el("div", { class: "ff-actions" }, [
-    button("Fill approved fields", () => void fillApproved(), { class: "ff-btn ff-btn-primary" }),
-    button("Fill all low-sensitivity fields", () => previewLowSensitivity(), { class: "ff-btn" }),
-  ]);
-  root.append(batch);
-  root.append(
-    el("p", {
-      class: "ff-note",
-      text: "formfillm never submits forms. Review filled values before you submit.",
-    }),
-  );
-
-  const list = el("div", { class: "ff-fields" });
-  for (const f of state.fields) {
-    const c = state.classifications.get(f.fieldId);
-    if (c) list.append(renderFieldCard(f, c));
+  if (state.fields.length === 0 || state.stage === "idle") {
+    renderIntro(root);
+    return;
   }
-  root.append(list);
+  if (state.stage === "summary") {
+    renderSummary(root);
+    return;
+  }
+  renderGuidedStep(root);
 }
 
-function renderFieldCard(f: FieldMetadata, c: FieldClassification): HTMLElement {
-  const decision = state.decisions.get(f.fieldId) ?? "pending";
-  const card = el("div", { class: `ff-card ff-sens-${c.sensitivity}` });
-  card.setAttribute("data-decision", decision);
+function renderIntro(root: HTMLElement): void {
+  root.append(
+    el("div", { class: "ff-actions" }, [
+      button("Scan this page", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
+    ]),
+  );
+  root.append(
+    el("div", {
+      class: "ff-guidance",
+      attrs: { id: "guidance", role: "status", "aria-live": "polite" },
+      text:
+        state.fields.length === 0
+          ? "Click “Scan this page”. formfillm looks at the form, then walks you through each thing it asks for — one at a time — and explains it before anything is filled."
+          : `Found ${state.fields.length} field(s). Classifying with the local model…`,
+    }),
+  );
+}
 
-  // Header: label + sensitivity badge
-  const header = el("div", { class: "ff-card-head" }, [
-    el("span", { class: "ff-card-label", text: labelFor(f) }),
-    el("span", { class: `ff-badge ff-badge-${c.sensitivity}`, text: c.sensitivity }),
-  ]);
-  card.append(header);
+const SENSITIVITY_HELP: Record<string, string> = {
+  low: "Low sensitivity — generally safe to share.",
+  medium: "Personal info — share only with sites you trust.",
+  high: "Sensitive personal info — be careful, and only share if you really trust this site.",
+  secret: "Secret — formfillm will never fill this. If the site truly needs it, type it in yourself.",
+  unknown: "Unclear — take a careful look before deciding.",
+};
 
-  // Meta line
-  const typeStr = f.inputType ? `${f.kind}/${f.inputType}` : f.kind;
-  const meta = el("div", { class: "ff-card-meta" }, [
-    el("span", { text: typeStr }),
-    el("span", { text: f.required ? "required" : "optional" }),
-    el("span", { text: c.category }),
-    el("span", { text: `${Math.round(c.confidence * 100)}% conf.` }),
-  ]);
-  card.append(meta);
+function siteHost(): string {
+  const origin = state.page?.origin ?? "";
+  try {
+    return new URL(origin).host || origin || "this site";
+  } catch {
+    return origin || "this site";
+  }
+}
 
+function progressDots(total: number, index: number): HTMLElement {
+  const wrap = el("div", { class: "ff-progress", attrs: { "aria-hidden": "true" } });
+  for (let i = 0; i < total; i++) {
+    const cls = i < index ? " ff-dot-done" : i === index ? " ff-dot-current" : "";
+    wrap.append(el("span", { class: "ff-dot" + cls }));
+  }
+  return wrap;
+}
+
+function navRow(idx: number, total: number): HTMLElement {
+  const row = el("div", { class: "ff-nav-row" });
+  row.append(button("‹ Back", () => goBack(), { class: "ff-btn ff-btn-sm", disabled: idx === 0 }));
+  row.append(
+    button(idx === total - 1 ? "Finish ›" : "Next ›", () => advance(), { class: "ff-btn ff-btn-sm" }),
+  );
+  return row;
+}
+
+function renderGuidedStep(root: HTMLElement): void {
+  const total = state.fields.length;
+  const idx = Math.min(state.guidedIndex, total - 1);
+  const field = state.fields[idx]!;
+  const c = state.classifications.get(field.fieldId);
+  void highlight(field.fieldId); // scroll to + outline the field on the page
+
+  root.append(
+    el("div", { class: "ff-guided-head" }, [
+      el("span", { class: "ff-step-count", text: `Field ${idx + 1} of ${total}` }),
+      button("Scan again", () => void doScan(), { class: "ff-btn ff-btn-sm" }),
+    ]),
+  );
+  root.append(progressDots(total, idx));
+
+  if (!c) {
+    root.append(el("p", { class: "ff-card-warning", text: "This field could not be classified — please review it manually." }));
+    root.append(navRow(idx, total));
+    return;
+  }
+
+  const card = el("div", { class: `ff-card ff-guided ff-sens-${c.sensitivity}` });
+  card.append(
+    el("div", { class: "ff-card-head" }, [
+      el("span", { class: "ff-card-label", text: labelFor(field) }),
+      el("span", { class: `ff-badge ff-badge-${c.sensitivity}`, text: c.sensitivity }),
+    ]),
+  );
   card.append(el("p", { class: "ff-card-reason", text: c.plainLanguageReason }));
   if (c.possiblePurpose) {
-    card.append(el("p", { class: "ff-card-purpose", text: `Possible purpose: ${c.possiblePurpose}` }));
+    card.append(el("p", { class: "ff-card-purpose", text: `Why a site might ask: ${c.possiblePurpose}` }));
   }
-  card.append(el("p", { class: "ff-card-action", text: `Suggested: ${c.recommendedAction.replace(/_/g, " ")}` }));
+  card.append(el("p", { class: "ff-sens-help", text: SENSITIVITY_HELP[c.sensitivity] ?? "" }));
+  for (const w of c.warnings) card.append(el("p", { class: "ff-card-warning", text: `⚠ ${w}` }));
 
-  for (const w of c.warnings) {
-    card.append(el("p", { class: "ff-card-warning", text: `⚠ ${w}` }));
-  }
+  const decided = state.decisions.get(field.fieldId);
+  const filled = state.fillResults.get(field.fieldId);
 
-  // Value preview / availability
   if (!isFillable(c)) {
-    card.append(el("p", { class: "ff-card-neverfill", text: "🔒 This field will never be filled by formfillm." }));
+    card.append(el("p", { class: "ff-card-neverfill", text: "🔒 formfillm will not fill this field." }));
+    card.append(
+      el("div", { class: "ff-card-controls" }, [
+        button("OK, next", () => advance(), { class: "ff-btn ff-btn-primary ff-btn-sm" }),
+      ]),
+    );
+  } else if (state.editing === field.fieldId) {
+    const existing = state.editedValues.get(field.fieldId) ?? resolveValue(c) ?? "";
+    const input = el("input", {
+      class: "ff-input",
+      attrs: { type: "text", "aria-label": `Value for ${labelFor(field)}` },
+    }) as HTMLInputElement;
+    input.value = existing;
+    card.append(el("label", { class: "ff-edit-label", text: "Type the value to fill:" }));
+    card.append(input);
+    card.append(
+      el("div", { class: "ff-card-controls" }, [
+        button("Save & fill", () => void saveEditAndFill(field, input.value), { class: "ff-btn ff-btn-primary ff-btn-sm" }),
+        button("Cancel", () => {
+          state.editing = null;
+          render();
+        }, { class: "ff-btn ff-btn-sm" }),
+      ]),
+    );
+    window.setTimeout(() => input.focus(), 0);
   } else {
     const value = resolveValue(c);
     if (value !== undefined) {
-      card.append(
-        el("p", { class: "ff-card-value", text: `Value to fill: ${maskValue(value, c.sensitivity)}` }),
-      );
+      card.append(el("p", { class: "ff-card-value", text: `What we'd fill: ${maskValue(value, c.sensitivity)}` }));
     } else {
-      card.append(
-        el("p", { class: "ff-card-value ff-muted", text: "No matching profile value — add one in Review profile, or use “Edit then fill”." }),
-      );
+      card.append(el("p", { class: "ff-card-value ff-muted", text: "No saved value for this. Use “Type it in” to enter one, or skip." }));
     }
-  }
+    if (decided) {
+      const note =
+        decided === "skipped" ? "You skipped this." :
+        decided === "marked_wrong" ? "You flagged this as wrong." :
+        filled ? "✓ Filled on the page." : "Approved (could not fill).";
+      card.append(el("p", { class: "ff-card-decision", text: note }));
+    }
+    card.append(el("p", { class: "ff-card-question", text: `Share this with ${siteHost()}?` }));
 
-  // Decision controls
-  if (decision !== "pending") {
-    card.append(el("p", { class: "ff-card-decision", text: `Your decision: ${decision.replace(/_/g, " ")}` }));
-  }
-
-  if (isFillable(c)) {
     const controls = el("div", { class: "ff-card-controls" });
-    const hasValue = resolveValue(c) !== undefined;
     controls.append(
-      button("Approve fill", () => setDecision(f.fieldId, "approved"), {
-        class: "ff-btn ff-btn-sm" + (decision === "approved" ? " ff-btn-on" : ""),
-        disabled: !hasValue,
-      }),
+      button(value !== undefined ? "Yes, fill it" : "Type it in", () => {
+        if (value !== undefined) void guidedApprove(field, c);
+        else {
+          state.editing = field.fieldId;
+          render();
+        }
+      }, { class: "ff-btn ff-btn-primary ff-btn-sm" }),
     );
-    controls.append(
-      button("Edit then fill", () => promptEdit(f, c), {
-        class: "ff-btn ff-btn-sm" + (decision === "edited" ? " ff-btn-on" : ""),
-      }),
-    );
-    controls.append(
-      button("Skip", () => setDecision(f.fieldId, "skipped"), {
-        class: "ff-btn ff-btn-sm" + (decision === "skipped" ? " ff-btn-on" : ""),
-      }),
-    );
-    controls.append(
-      button("Mark wrong", () => setDecision(f.fieldId, "marked_wrong"), {
-        class: "ff-btn ff-btn-sm" + (decision === "marked_wrong" ? " ff-btn-on" : ""),
-      }),
-    );
+    if (value !== undefined) {
+      controls.append(button("Edit", () => {
+        state.editing = field.fieldId;
+        render();
+      }, { class: "ff-btn ff-btn-sm" }));
+    }
+    controls.append(button("Skip", () => guidedDecision(field, "skipped"), { class: "ff-btn ff-btn-sm" }));
+    controls.append(button("This looks wrong", () => guidedDecision(field, "marked_wrong"), { class: "ff-btn ff-btn-sm" }));
     card.append(controls);
   }
 
-  // Highlight on hover/focus of the card.
-  card.addEventListener("mouseenter", () => void highlight(f.fieldId));
-  card.tabIndex = 0;
-  card.addEventListener("focus", () => void highlight(f.fieldId));
-  return card;
+  root.append(card);
+  root.append(navRow(idx, total));
 }
 
-function setDecision(fieldId: string, decision: Decision): void {
-  state.decisions.set(fieldId, decision);
+async function fillCurrentField(field: FieldMetadata, value: string): Promise<boolean> {
+  if (state.tabId === null) return false;
+  const fills: FillInstruction[] = [{ fieldId: field.fieldId, value }];
+  const res = await sendBg<ApplyFillResponse>({ type: MSG.ApplyFill, tabId: state.tabId, fills });
+  return Boolean(res.results?.some((r) => r.fieldId === field.fieldId && r.filled));
+}
+
+async function guidedApprove(field: FieldMetadata, c: FieldClassification): Promise<void> {
+  state.decisions.set(field.fieldId, "approved");
+  const value = resolveValue(c);
+  if (value !== undefined) {
+    state.fillResults.set(field.fieldId, await fillCurrentField(field, value));
+  }
+  advance();
+}
+
+async function saveEditAndFill(field: FieldMetadata, value: string): Promise<void> {
+  state.editing = null;
+  if (value.trim() === "") {
+    guidedDecision(field, "skipped");
+    return;
+  }
+  state.editedValues.set(field.fieldId, value);
+  state.decisions.set(field.fieldId, "edited");
+  state.fillResults.set(field.fieldId, await fillCurrentField(field, value));
+  advance();
+}
+
+function guidedDecision(field: FieldMetadata, decision: Decision): void {
+  state.decisions.set(field.fieldId, decision);
+  state.editing = null;
+  advance();
+}
+
+function advance(): void {
+  state.editing = null;
+  if (state.guidedIndex < state.fields.length - 1) {
+    state.guidedIndex++;
+    render();
+  } else {
+    state.stage = "summary";
+    void commitSessionLedger().finally(() => render());
+  }
+}
+
+function goBack(): void {
+  state.editing = null;
+  if (state.guidedIndex > 0) state.guidedIndex--;
   render();
-}
-
-function promptEdit(f: FieldMetadata, c: FieldClassification): void {
-  const existing = state.editedValues.get(f.fieldId) ?? resolveValue(c) ?? "";
-  const input = el("input", {
-    class: "ff-edit-input",
-    attrs: { type: "text", value: existing, "aria-label": `Value for ${labelFor(f)}` },
-  }) as HTMLInputElement;
-  input.value = existing;
-
-  const wrap = el("div", { class: "ff-edit" }, [
-    el("label", { class: "ff-edit-label", text: `Enter value for “${labelFor(f)}”:` }),
-    input,
-    el("div", { class: "ff-card-controls" }, [
-      button("Save & approve", () => {
-        state.editedValues.set(f.fieldId, input.value);
-        state.decisions.set(f.fieldId, "edited");
-        render();
-      }, { class: "ff-btn ff-btn-sm ff-btn-primary" }),
-      button("Cancel", () => render(), { class: "ff-btn ff-btn-sm" }),
-    ]),
-  ]);
-
-  // Replace the card's controls area by re-rendering with an inline editor.
-  const root = viewRoot();
-  clear(root);
-  renderScanView(root);
-  root.append(wrap);
-  input.focus();
 }
 
 async function highlight(fieldId: string | null): Promise<void> {
@@ -367,6 +446,11 @@ async function doScan(): Promise<void> {
   state.classifications = new Map();
   state.decisions = new Map();
   state.editedValues = new Map();
+  state.fillResults = new Map();
+  state.editing = null;
+  state.ledgerCommitted = false;
+  state.guidedIndex = 0;
+  state.stage = "idle";
 
   guidanceText(`Found ${scan.fields.length} field(s). Classifying with the local model…`);
   render();
@@ -381,142 +465,117 @@ async function doScan(): Promise<void> {
     return;
   }
   for (const c of classify.classifications) state.classifications.set(c.fieldId, c);
-  const errNote = classify.errors && classify.errors.length ? ` (${classify.errors.length} note(s))` : "";
-  guidanceText(`Classified ${classify.classifications.length} field(s)${errNote}. Review and approve below.`);
+  // Enter the guided wizard at the first field.
+  state.stage = "guided";
+  state.guidedIndex = 0;
   render();
 }
 
-interface LedgerPlan {
-  fieldId: string;
-  base: Omit<Parameters<typeof buildLedgerEntry>[0], "filled">;
-  attempted: boolean;
-}
+/**
+ * Write this session's decisions to the disclosure ledger exactly once, when
+ * the user reaches the summary. Records categories and decisions only — never
+ * values (valueStored is always false; see ledger.ts).
+ */
+async function commitSessionLedger(): Promise<void> {
+  if (state.ledgerCommitted) return;
+  state.ledgerCommitted = true;
 
-function buildApprovedFills(): { fills: FillInstruction[]; plans: LedgerPlan[] } {
-  const fills: FillInstruction[] = [];
-  const plans: LedgerPlan[] = [];
   const now = Date.now();
   const origin = state.page?.origin ?? "unknown";
   const title = state.page?.title ?? null;
+  const entries: LedgerEntry[] = [];
 
   for (const f of state.fields) {
     const c = state.classifications.get(f.fieldId);
     if (!c) continue;
-    const decision = state.decisions.get(f.fieldId) ?? "pending";
     const fillable = isFillable(c);
-
-    let attempted = false;
-    if ((decision === "approved" || decision === "edited") && fillable) {
-      const value = resolveValue(c);
-      if (value !== undefined) {
-        fills.push({ fieldId: f.fieldId, value });
-        attempted = true;
-      }
-    }
-
-    // Record a ledger plan for any field with a non-pending decision, plus
-    // secrets (recorded as never_fill) so the ledger reflects what was seen.
+    const d = state.decisions.get(f.fieldId);
     const ledgerDecision =
       !fillable ? "never_fill" :
-      decision === "approved" ? "approved" :
-      decision === "edited" ? "edited" :
-      decision === "skipped" ? "skipped" :
-      decision === "marked_wrong" ? "marked_wrong" :
-      null;
+      d === "approved" ? "approved" :
+      d === "edited" ? "edited" :
+      d === "skipped" ? "skipped" :
+      d === "marked_wrong" ? "marked_wrong" :
+      null; // not reviewed → not recorded
 
-    if (ledgerDecision) {
-      plans.push({
-        fieldId: f.fieldId,
-        attempted,
-        base: {
-          timestamp: now,
-          siteOrigin: origin,
-          pageTitle: title,
-          fieldLabel: labelFor(f),
-          category: c.category,
-          sensitivity: c.sensitivity,
-          decision: ledgerDecision,
-        },
-      });
-    }
-  }
-  return { fills, plans };
-}
-
-async function fillApproved(): Promise<void> {
-  if (state.tabId === null) {
-    guidanceText("Scan a page first.");
-    return;
-  }
-  const { fills, plans } = buildApprovedFills();
-
-  const commitLedger = async (filledIds: Set<string>) => {
-    const entries: LedgerEntry[] = plans.map((p) =>
-      buildLedgerEntry({ ...p.base, filled: p.attempted && filledIds.has(p.fieldId) }),
+    if (!ledgerDecision) continue;
+    entries.push(
+      buildLedgerEntry({
+        timestamp: now,
+        siteOrigin: origin,
+        pageTitle: title,
+        fieldLabel: labelFor(f),
+        category: c.category,
+        sensitivity: c.sensitivity,
+        decision: ledgerDecision,
+        filled: state.fillResults.get(f.fieldId) ?? false,
+      }),
     );
-    if (entries.length) await appendLedger(entries);
-  };
-
-  if (fills.length === 0) {
-    await commitLedger(new Set());
-    guidanceText("No approved fields with available values to fill.");
-    return;
   }
-
-  guidanceText(`Filling ${fills.length} approved field(s)…`);
-  const res = await sendBg<ApplyFillResponse>({ type: MSG.ApplyFill, tabId: state.tabId, fills });
-
-  const filledIds = new Set((res.results ?? []).filter((r) => r.filled).map((r) => r.fieldId));
-  await commitLedger(filledIds);
-
-  if (!res.ok) {
-    guidanceText(res.error ?? "Fill failed.");
-    return;
-  }
-  const ok = filledIds.size;
-  const fail = (res.results ?? []).length - ok;
-  guidanceText(
-    `Filled ${ok} field(s)${fail ? `, ${fail} could not be filled` : ""}. Review before submitting. (Recorded in ledger; no values stored.)`,
-  );
+  if (entries.length) await appendLedger(entries);
 }
 
-function previewLowSensitivity(): void {
-  const candidates = state.fields.filter((f) => {
+function renderSummary(root: HTMLElement): void {
+  let filled = 0;
+  let skipped = 0;
+  let wrong = 0;
+  let never = 0;
+  let pending = 0;
+  const rows: HTMLElement[] = [];
+
+  for (const f of state.fields) {
     const c = state.classifications.get(f.fieldId);
-    return c && isLowSensitivityBatchable(c) && resolveValue(c) !== undefined;
-  });
-
-  const root = viewRoot();
-  clear(root);
-  renderScanView(root);
-
-  if (candidates.length === 0) {
-    guidanceText("No low-sensitivity fields with available values to fill.");
-    return;
-  }
-
-  const list = el("div", { class: "ff-preview" }, [
-    el("h3", { text: "These low-sensitivity fields will be filled:" }),
-  ]);
-  for (const f of candidates) {
-    const c = state.classifications.get(f.fieldId)!;
-    list.append(
+    if (!c) continue;
+    const d = state.decisions.get(f.fieldId);
+    let outcome: string;
+    if (!isFillable(c)) {
+      outcome = "never filled (secret)";
+      never++;
+    } else if ((d === "approved" || d === "edited") && state.fillResults.get(f.fieldId)) {
+      outcome = "filled";
+      filled++;
+    } else if (d === "approved" || d === "edited") {
+      outcome = "approved, but could not fill";
+    } else if (d === "skipped") {
+      outcome = "skipped";
+      skipped++;
+    } else if (d === "marked_wrong") {
+      outcome = "flagged wrong";
+      wrong++;
+    } else {
+      outcome = "not reviewed";
+      pending++;
+    }
+    rows.push(
       el("div", { class: "ff-preview-row" }, [
         el("span", { text: labelFor(f) }),
-        el("span", { class: "ff-muted", text: resolveValue(c) ?? "" }),
+        el("span", { class: "ff-muted", text: outcome }),
       ]),
     );
   }
-  list.append(
-    el("div", { class: "ff-card-controls" }, [
-      button("Confirm & fill", () => {
-        for (const f of candidates) state.decisions.set(f.fieldId, "approved");
-        void fillApproved();
-      }, { class: "ff-btn ff-btn-sm ff-btn-primary" }),
-      button("Cancel", () => render(), { class: "ff-btn ff-btn-sm" }),
+
+  root.append(el("h2", { text: "All done" }));
+  root.append(
+    el("div", {
+      class: "ff-guidance",
+      attrs: { role: "status", "aria-live": "polite" },
+      text:
+        `Filled ${filled} field(s). ${skipped} skipped, ${wrong} flagged, ${never} never-fill` +
+        (pending ? `, ${pending} not reviewed` : "") +
+        ". Nothing was submitted — please review the page and submit it yourself when you're ready.",
+    }),
+  );
+  root.append(el("div", { class: "ff-preview" }, [el("h3", { text: "Summary" }), ...rows]));
+  root.append(
+    el("div", { class: "ff-actions" }, [
+      button("Review again", () => {
+        state.stage = "guided";
+        state.guidedIndex = 0;
+        render();
+      }, { class: "ff-btn" }),
+      button("Scan again", () => void doScan(), { class: "ff-btn ff-btn-primary" }),
     ]),
   );
-  root.append(list);
 }
 
 // ---------------------------------------------------------------------------

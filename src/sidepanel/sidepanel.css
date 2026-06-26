@@ -315,6 +315,59 @@ body {
   border-color: var(--accent);
 }
 
+/* Guided wizard */
+.ff-guided-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+}
+.ff-step-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--teal-bright);
+}
+.ff-progress {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 12px;
+}
+.ff-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.ff-dot-done {
+  background: var(--ok);
+}
+.ff-dot-current {
+  background: var(--teal-bright);
+  box-shadow: 0 0 0 3px rgba(20, 163, 167, 0.25);
+}
+.ff-card.ff-guided {
+  border-left: 3px solid var(--teal-bright);
+}
+.ff-card.ff-guided .ff-card-label {
+  font-size: 16px;
+}
+.ff-sens-help {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ff-card-question {
+  margin: 10px 0 6px;
+  font-weight: 600;
+}
+.ff-nav-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .ff-preview {
   background: var(--panel);
   border: 1px solid var(--border);

@@ -72,12 +72,12 @@ npm run build      # outputs dist/
 1. Open a form page — e.g. `dev/sample-form.html` (open it as a local file in Chrome).
 2. Click the **formfillm** toolbar icon to open the side panel (this grants `activeTab` access to that page).
 3. Click **Scan this page**.
-4. Review the detected fields: category, sensitivity, confidence, and a plain-language explanation.
-5. Approve, edit, skip, or mark-wrong individual fields.
-6. Click **Fill approved fields** (or **Fill all low-sensitivity fields** after reviewing the preview).
-7. Review the filled values and submit the form yourself.
+4. formfillm walks you through the form **one field at a time** ("Field 2 of 6"). For each field it shows a plain-language explanation, the sensitivity, and — when you have a matching saved value — exactly what it would fill.
+5. For each field choose: **Yes, fill it** (fills that field immediately and moves on), **Edit** / **Type it in** (enter or override the value, then fill), **Skip**, or **This looks wrong**. Secret fields (passwords, SIN/SSN, etc.) are shown but never filled.
+6. Use **Back / Next** to move around; at the end you get a **summary** of what was filled, skipped, and flagged.
+7. Review the filled values on the page and submit the form yourself — formfillm never submits.
 
-Open **Review profile** first to enter your data (or click **Create demo profile** for fake values to test with).
+Open **Review profile** first to enter your data (or **Create demo profile** for fake values to test with). A value-free record of your decisions is kept in **Disclosure ledger**.
 
 ---
 
