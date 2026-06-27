@@ -67,6 +67,24 @@ describe("validateClassificationResponse", () => {
     expect(classifications.every((c) => c.recommendedAction === "manual_review")).toBe(true);
     expect(errors.length).toBeGreaterThan(0);
   });
+
+  it("accepts a bare top-level array (models often drop the wrapper)", () => {
+    const raw = [
+      { fieldId: "ff-0", category: "contact.email", sensitivity: "medium", recommendedAction: "ask", plainLanguageReason: "", possiblePurpose: "" },
+      { fieldId: "ff-1", category: "demographic.birthdate", sensitivity: "high", recommendedAction: "ask_explicit", plainLanguageReason: "", possiblePurpose: "" },
+    ];
+    const { classifications, errors } = validateClassificationResponse(raw, ["ff-0", "ff-1"]);
+    const byId = new Map(classifications.map((c) => [c.fieldId, c]));
+    expect(byId.get("ff-0")!.category).toBe("contact.email");
+    expect(byId.get("ff-1")!.sensitivity).toBe("high");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("accepts a {fields:[...]} wrapper too", () => {
+    const raw = { fields: [{ fieldId: "ff-0", category: "contact.email", sensitivity: "medium", recommendedAction: "ask", plainLanguageReason: "", possiblePurpose: "" }] };
+    const { classifications } = validateClassificationResponse(raw, ["ff-0"]);
+    expect(classifications[0]!.category).toBe("contact.email");
+  });
 });
 
 describe("makeFailClosedClassification", () => {
@@ -88,5 +106,9 @@ describe("extractJson", () => {
   });
   it("returns null when no JSON object present", () => {
     expect(extractJson("no json here")).toBeNull();
+  });
+  it("parses a bare top-level array, including in fences", () => {
+    expect(extractJson('[{"a":1},{"a":2}]')).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(extractJson('```json\n[{"a":1}]\n```')).toEqual([{ a: 1 }]);
   });
 });

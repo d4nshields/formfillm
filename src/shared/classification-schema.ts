@@ -30,18 +30,16 @@ export const CLASSIFICATION_JSON_SCHEMA = {
           fieldId: { type: "string" },
           category: { type: "string", enum: [...FIELD_CATEGORIES] },
           sensitivity: { type: "string", enum: [...SENSITIVITIES] },
-          confidence: { type: "number", minimum: 0, maximum: 1 },
-          plainLanguageReason: { type: "string" },
-          possiblePurpose: { type: "string" },
+          plainLanguageReason: { type: "string", maxLength: 80 },
+          possiblePurpose: { type: "string", maxLength: 60 },
           recommendedAction: { type: "string", enum: [...RECOMMENDED_ACTIONS] },
           profileKeySuggestion: { type: ["string", "null"] },
-          warnings: { type: "array", items: { type: "string" } },
+          warnings: { type: "array", items: { type: "string", maxLength: 100 } },
         },
         required: [
           "fieldId",
           "category",
           "sensitivity",
-          "confidence",
           "plainLanguageReason",
           "possiblePurpose",
           "recommendedAction",
@@ -137,10 +135,16 @@ export function validateClassificationResponse(
   const errors: string[] = [];
   const byId = new Map<string, FieldClassification>();
 
-  const arr =
-    typeof raw === "object" && raw !== null && Array.isArray((raw as { classifications?: unknown }).classifications)
+  // Accept the wrapped form {"classifications":[...]} OR {"fields":[...]} OR a
+  // bare top-level array [...]. Local models frequently return a bare array
+  // even when asked to wrap it, so tolerate all three rather than fail closed.
+  const arr: unknown[] | null = Array.isArray(raw)
+    ? raw
+    : typeof raw === "object" && raw !== null && Array.isArray((raw as { classifications?: unknown }).classifications)
       ? (raw as { classifications: unknown[] }).classifications
-      : null;
+      : typeof raw === "object" && raw !== null && Array.isArray((raw as { fields?: unknown }).fields)
+        ? (raw as { fields: unknown[] }).fields
+        : null;
 
   if (!arr) {
     errors.push("Response missing a valid `classifications` array.");
@@ -179,16 +183,23 @@ export function extractJson(content: string): unknown | null {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // Fall through to brace extraction.
+    // Fall through to bracket extraction.
   }
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    const slice = trimmed.slice(start, end + 1);
+  // Try the outermost {...} object or [...] array block, whichever starts
+  // first (models may return a bare array, sometimes wrapped in prose/fences).
+  const candidates: Array<[number, number]> = [];
+  const os = trimmed.indexOf("{");
+  const oe = trimmed.lastIndexOf("}");
+  if (os >= 0 && oe > os) candidates.push([os, oe]);
+  const as = trimmed.indexOf("[");
+  const ae = trimmed.lastIndexOf("]");
+  if (as >= 0 && ae > as) candidates.push([as, ae]);
+  candidates.sort((a, b) => a[0] - b[0]);
+  for (const [s, e] of candidates) {
     try {
-      return JSON.parse(slice);
+      return JSON.parse(trimmed.slice(s, e + 1));
     } catch {
-      return null;
+      // try the next candidate
     }
   }
   return null;

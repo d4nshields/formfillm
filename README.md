@@ -45,6 +45,8 @@ ollama pull qwen2.5:7b      # legacy fallback
 
 These sizes are a guide, not a hard rule — Ollama can't report your total VRAM, but **Settings → Test Ollama connection** measures the real GPU/CPU split for whatever you load (from `/api/ps`), so you can confirm a model actually fits before relying on it. Anything that shows time on CPU there will be slower.
 
+For measured latency-vs-quality numbers behind the `:4b` default (and why `:2b` isn't recommended despite being faster), see [docs/MODEL-BENCHMARK.md](./docs/MODEL-BENCHMARK.md).
+
 Confirm your local models and API:
 
 ```bash
