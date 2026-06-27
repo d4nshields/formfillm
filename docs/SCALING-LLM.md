@@ -116,7 +116,55 @@ profile-derived prompts can travel — though note classification still sends
 *metadata only*, never stored values), not something to enable by default. It
 would also touch the `manifest.json` CSP `connect-src` and `host_permissions`.
 
-## 5. Appendix — if/when you do the backend-agnostic refactor
+## 5. Running it on your hardware (dev → LAN service)
+
+The target is a **dedicated LLM service on the local network serving a fixed
+number of workstations**, reached by upgrading hardware incrementally. Because
+the extension is just an OpenAI-compatible `/v1` client, every stage below is a
+**config/URL change, not a code change.**
+
+**Stage 0 — RTX 4060 8 GB (current): dev/test only.**
+- Fine for *learning* the serving engines and validating the `/v1` client path
+  end to end. **Not** representative of the serving goal — 8 GB leaves almost no
+  room for concurrent KV caches once weights are loaded, so the concurrency
+  payoff barely materializes.
+- If trying SGLang/vLLM here: use a **quantized** small model (AWQ/GPTQ/FP8 —
+  their **GGUF support is experimental**, so the Ollama `qwen3.5:4b` GGUF won't
+  carry over directly), and cap KV pre-allocation (SGLang `--mem-fraction-static`,
+  vLLM `--gpu-memory-utilization`) or it may OOM while reserving cache. For
+  day-to-day dev, **Ollama remains the easiest** on this card.
+
+**Stage 1 — RTX 5060 Ti 16 GB (incoming): first real serving box.**
+- 16 GB comfortably holds a 4B at FP16 or a 7–14B quantized model **with real KV
+  headroom** for modest concurrency — the point where SGLang/vLLM begin to earn
+  their keep.
+- **Blackwell caveat (important):** the RTX 50-series is **sm_120** and needs a
+  very recent stack — **CUDA 12.8+/cu128**, recent PyTorch (2.6+/nightly), and
+  matching vLLM/SGLang builds. **Flash Attention 3 is not supported on Blackwell
+  yet → use FA2** (e.g. `VLLM_FLASH_ATTN_VERSION=2`). Expect setup friction until
+  stable wheels catch up; the CUDA 12.8 (cu128) containers are the smoothest
+  path.
+
+**Stage 2 — dedicated LAN box for N workstations.**
+- A **fixed, known client count** makes sizing tractable: provision a bounded
+  number of concurrent slots (`--parallel` / `OLLAMA_NUM_PARALLEL`) and size VRAM
+  for *N* KV caches, not open-ended scale. Real simultaneity is usually well
+  below *N* (workstations rarely classify at the same instant), so a single
+  mid-range GPU (16–24 GB) can serve a small office.
+- This is where **SGLang's prefix caching** pays off most: every workstation
+  reuses the same system-prompt + schema, processed once.
+- **The network crossing — not the engine — is the real change.** Pointing the
+  extension at a LAN host means relaxing the localhost-only pin (host validation
+  + `manifest.json` CSP) to *one trusted host*, ideally fronted by HTTPS/mTLS.
+  Treat it as a deliberate security step (see §4). The privacy model still
+  holds: classification sends **metadata only**, never stored profile values.
+
+**Recommended path:** keep **Ollama on the 4060 / 5060 Ti for local dev**, stand
+up **SGLang or vLLM on the 5060 Ti** to learn the serving side, then graduate to
+a **dedicated LAN box** once the workstation count justifies it — all behind the
+same `/v1` boundary, so the extension never changes.
+
+## 6. Appendix — if/when you do the backend-agnostic refactor
 
 Not implemented here; this is the map for later.
 
@@ -142,7 +190,7 @@ Not implemented here; this is the map for later.
   `ollama-policy.ts`, `messages.ts`, `sidepanel.ts`, `types.ts`) plus
   `manifest.json` (CSP/port/host) if a non-localhost host is ever allowed.
 
-## 6. Sources
+## 7. Sources
 
 Figures are version- and hardware-dependent; verify against current releases.
 
@@ -154,3 +202,10 @@ Figures are version- and hardware-dependent; verify against current releases.
 - vLLM / PagedAttention: [Inside vLLM](https://vllm.ai/blog/anatomy-of-vllm),
   [vLLM repo](https://github.com/vllm-project/vllm).
 - SGLang vs vLLM: [benchmark](https://github.com/qiulang/vllm-sglang-perf).
+- SGLang on consumer GPUs / VRAM: [install guide](https://www.gpu-mart.com/blog/how-to-install-and-use-sglang),
+  [SGLang release notes (NVIDIA)](https://docs.nvidia.com/deeplearning/frameworks/sglang-release-notes/rel-25-10.html).
+- Blackwell (RTX 50-series, sm_120) support: vLLM issues
+  [#13306](https://github.com/vllm-project/vllm/issues/13306) /
+  [#14452](https://github.com/vllm-project/vllm/issues/14452), PyTorch sm_120
+  [#164342](https://github.com/pytorch/pytorch/issues/164342); and a survey of
+  private inference on consumer Blackwell GPUs ([arXiv:2601.09527](https://arxiv.org/html/2601.09527v1)).
