@@ -1,0 +1,156 @@
+# Scaling the LLM backend — concurrency, engine tiers, and a future-proof boundary
+
+> **Status: forward-looking design memo, not a current requirement.**
+> formfillm today talks only to a local Ollama on the same machine, and that is
+> the right design for the extension as it stands. This memo records what we
+> learned while asking a bigger question: *if* inference were later moved off the
+> workstation onto a **dedicated GPU box serving many users**, what changes, and
+> what would make that transition cheap?
+
+## 1. Why this memo
+
+The extension runs a local model per workstation. For heavier or more complex
+queries — or simply to avoid putting an expensive GPU in every workstation — a
+natural future architecture is **one shared inference server** that many clients
+hit concurrently. That raises a concrete question the rest of this memo answers:
+how do local LLM servers actually handle **concurrent** requests, and which one
+belongs on a shared box?
+
+None of this is needed for the current extension. It is a roadmap.
+
+## 2. The concurrency claim, fact-checked
+
+A common claim (e.g. in YouTube comparisons) is:
+
+> *"Ollama serves requests one at a time and blocks concurrency, while llama.cpp
+> divides GPU resources between concurrent processes."*
+
+It is **half right, with one outright misconception.**
+
+### "Ollama serves one at a time" — true for the default, not a hard limit
+
+Ollama gained real concurrency in mid-2024 (PRs
+[#3418](https://github.com/ollama/ollama/pull/3418) and
+[#4218](https://github.com/ollama/ollama/pull/4218)). It is controlled by:
+
+- `OLLAMA_NUM_PARALLEL` — concurrent requests per loaded model. **Default is
+  conservative (1 in current versions)**, so out of the box requests are
+  effectively serialized.
+- `OLLAMA_MAX_LOADED_MODELS` — how many models can be resident at once.
+- `OLLAMA_MAX_QUEUE` — how many requests queue before rejection (default ~512).
+
+So the "one at a time" behavior is a **default you didn't change**, not a
+capability gap. Set `OLLAMA_NUM_PARALLEL>1` and Ollama serves concurrently —
+using llama.cpp's batching underneath, because **Ollama embeds llama.cpp as its
+engine.** Memory scales roughly linearly with the parallelism × context.
+
+### "llama.cpp divides the GPU between concurrent processes" — mechanism is wrong
+
+`llama-server` does **not** spin up multiple OS processes. It runs **one process
+with multiple logical "slots"** doing **continuous (in-flight) batching**:
+
+- Model weights are loaded **once and shared** across all slots.
+- A **single unified KV cache** (`--ctx-size`) is split across slots
+  (`--parallel N` / `-np N`); a per-sequence mask keeps each request attending
+  only to its own tokens.
+- Each decode step **batches tokens from all active slots into one GPU kernel
+  launch**, which is exactly what makes a GPU efficient.
+
+Separate processes would each need a **full copy of the model in VRAM** — the
+*opposite* of efficient. The reason llama.cpp scales under load is **batching,
+not processes**.
+
+**Net:** the claim's *conclusion* (llama.cpp handles concurrency better than
+stock Ollama) is directionally true; its *explanation* is a misconception, and
+the real mechanism is continuous batching plus less-conservative defaults.
+
+## 3. Engine tiers — which tool for which job
+
+Because Ollama *is* llama.cpp under the hood, for a shared many-user box the real
+choice is not "Ollama vs llama.cpp" — it is whether to step up to a
+purpose-built serving engine.
+
+| Engine | Concurrency model | Best for |
+|--------|-------------------|----------|
+| **Ollama** | llama.cpp batching, but **opt-in & conservative** (`OLLAMA_NUM_PARALLEL=1` default) | Zero-friction local/desktop dev; single user |
+| **llama.cpp / llama-server** | One process, slots, continuous batching, shared KV | Edge / GGUF / Apple Silicon / aggressive quantization; hard JSON-grammar enforcement |
+| **vLLM** | **PagedAttention** — paged KV cache, near-zero fragmentation, prefix sharing | Datacenter NVIDIA GPUs, **many concurrent users**, FP16/AWQ/GPTQ |
+| **SGLang** | **RadixAttention** — prefix-tree KV reuse | High concurrency **plus structured/JSON output** and shared-prefix workloads |
+
+Indicative throughput under concurrency (version- and hardware-dependent; treat
+as orders of magnitude, not guarantees):
+
+- vLLM is roughly **1.2–1.8× faster than llama.cpp at ~16 concurrent requests**,
+  and dramatically faster than **default** Ollama (one benchmark cited ~19×).
+- SGLang is competitive with or ahead of vLLM on structured-output workloads.
+
+### Why SGLang is interesting *for formfillm specifically*
+
+Every classification call sends the **same large system prompt + JSON schema**
+(see `src/shared/prompts.ts` and `src/shared/classification-schema.ts`); only the
+per-form field metadata changes. Engines with **prefix caching** (SGLang's
+RadixAttention, and prefix sharing in vLLM) would process that shared prefix
+**once** and reuse it across users, instead of re-ingesting it on every request.
+At single-user scale this is irrelevant; at many-user scale it is a large win.
+
+## 4. The architecture takeaway — one boundary makes the rest cheap
+
+All four engines — Ollama, llama-server, vLLM, SGLang — expose the **same
+OpenAI-compatible `POST /v1/chat/completions`** endpoint. So the future-proof
+move is not to pivot the engine; it is to make the extension's single inference
+call **speak that wire format**. Then:
+
+- **Today:** point at local Ollama (`http://127.0.0.1:11434/v1/...`).
+- **Later:** point at a shared `llama-server` / vLLM / SGLang box — a **URL
+  change**, with no extension-code change, and free A/B between engines.
+
+### Privacy / local-only consideration (important)
+
+Using the OpenAI **wire format** against a **self-hosted** server is **not** a
+cloud integration — it is a protocol, served locally. The local-only guard in
+`src/shared/ollama-policy.ts` (`validateOllamaUrl`) still applies. **However**, a
+centralized box on the LAN would mean relaxing the strict
+`localhost`/`127.0.0.1`/`[::1]` + port-`11434` pin to allow a specific trusted
+host. That is a **deliberate, separate security decision** (it widens where
+profile-derived prompts can travel — though note classification still sends
+*metadata only*, never stored values), not something to enable by default. It
+would also touch the `manifest.json` CSP `connect-src` and `host_permissions`.
+
+## 5. Appendix — if/when you do the backend-agnostic refactor
+
+Not implemented here; this is the map for later.
+
+- **The seam is already clean:** all inference goes through `ollamaChat()` in
+  `src/background/service-worker.ts`. That is the one function to generalize.
+- **Two real wrinkles:**
+  1. **Structured output mapping.** Ollama's native `format: <schema>` becomes
+     OpenAI `response_format: { type: "json_schema", json_schema: {...} }`.
+     Bonus: llama-server / vLLM / SGLang enforce the schema as a **hard grammar
+     constraint** during sampling — stronger than Ollama 0.21.2, which (as we
+     found) did not enforce ours. See `docs/MODEL-BENCHMARK.md`.
+  2. **"Thinking" control is per-backend.** formfillm relies on thinking-off
+     (`think:false`) for both correctness and speed. The equivalent differs by
+     engine: Ollama `think:false`; llama.cpp `--reasoning-budget 0`; vLLM/SGLang
+     via model/template args. (Caveat: llama.cpp disables grammar enforcement
+     when thinking is *on* — fine for us, since we run it off.)
+- **What stays Ollama-native and should degrade gracefully:** the Settings model
+  list (`/api/tags`) and the measured GPU/CPU fit (`/api/ps` → `assessVramFit` in
+  `src/shared/ollama-policy.ts`). These have no clean equivalent on a generic
+  OpenAI endpoint; treat them as Ollama-only conveniences that simply hide when
+  the backend isn't Ollama.
+- **Rough blast radius:** ~3–5 source files (`service-worker.ts`,
+  `ollama-policy.ts`, `messages.ts`, `sidepanel.ts`, `types.ts`) plus
+  `manifest.json` (CSP/port/host) if a non-localhost host is ever allowed.
+
+## 6. Sources
+
+Figures are version- and hardware-dependent; verify against current releases.
+
+- Ollama concurrency: PRs [#3418](https://github.com/ollama/ollama/pull/3418),
+  [#4218](https://github.com/ollama/ollama/pull/4218); [Ollama FAQ](https://docs.ollama.com/faq).
+- llama.cpp server & batching: [server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md),
+  batching discussions [#4130](https://github.com/ggml-org/llama.cpp/discussions/4130)
+  and [#15180](https://github.com/ggml-org/llama.cpp/discussions/15180).
+- vLLM / PagedAttention: [Inside vLLM](https://vllm.ai/blog/anatomy-of-vllm),
+  [vLLM repo](https://github.com/vllm-project/vllm).
+- SGLang vs vLLM: [benchmark](https://github.com/qiulang/vllm-sglang-perf).

@@ -126,6 +126,10 @@ All cross-context messages are discriminated unions keyed on `type` (`src/shared
 
 Static files (`manifest.json`, `sidepanel.html`, `sidepanel.css`, `icons/`) are copied verbatim. No plugins, no remote fetches at build time — deliberately minimal and auditable.
 
+## Scaling the LLM backend (future)
+
+The inference call is funneled through a single `ollamaChat()` seam, which keeps the door open to a future centralized GPU server (llama.cpp / vLLM / SGLang) via the shared OpenAI-compatible endpoint. That is a forward-looking option, not a current requirement — see [docs/SCALING-LLM.md](./SCALING-LLM.md) for the concurrency analysis, engine tiers, and the local-only caveats.
+
 ## Reference use
 
 **formfillm is an independent, original work and is not a derivative of any other project.** No source code, assets, or project structure were copied or adapted; the scanning and filling code in `src/content/` was written from scratch.
