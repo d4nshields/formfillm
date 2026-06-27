@@ -1,119 +1,136 @@
-# Plan — backend-agnostic (OpenAI-compatible) inference
+# Plan — backend-agnostic inference via the OpenAI-compatible endpoint
 
 > **Status: PLANNED, not implemented. No code has been changed.**
-> This is a reviewable implementation plan only. It exists so the decision to
-> proceed (or not) can be made deliberately after reviewing the concurrency
-> analysis in [SCALING-LLM.md](./SCALING-LLM.md).
+> A reviewable implementation plan only, so the decision to proceed can be made
+> deliberately. Rationale and engine analysis: [SCALING-LLM.md](./SCALING-LLM.md).
 
 ## Context
 
-formfillm talks to a local Ollama through Ollama's **native** `/api/*`
-endpoints. The concurrency review (see [SCALING-LLM.md](./SCALING-LLM.md))
-concluded that a future **centralized GPU box serving many users** would most
-likely run **vLLM or SGLang**, and that all candidate backends (Ollama,
-llama-server, vLLM, SGLang) expose the **same OpenAI-compatible
-`POST /v1/chat/completions`** endpoint.
+formfillm talks to a local Ollama through Ollama's **native** `/api/*` endpoints.
+The concurrency review ([SCALING-LLM.md](./SCALING-LLM.md)) concluded a future
+**centralized GPU box serving many users** would most likely run **vLLM or
+SGLang**, and that all candidate backends (Ollama, llama-server, vLLM, SGLang)
+expose the same **OpenAI-compatible `POST /v1/chat/completions`**.
 
-The cheap, future-proofing move is therefore to generalize the single inference
-call to that wire format, so the extension stays a thin client and "move
-inference to a shared box later" becomes a configuration change — **not** an
-engine rewrite. Ollama remains the zero-friction local default.
+Two design decisions are settled:
+
+- **Agnostic, not architecture-specific.** SGLang's advantage (RadixAttention
+  prefix caching) is automatic and **server-side**, and its API is
+  OpenAI-compatible — so targeting SGLang specifically would add a second code
+  path for **zero client-side gain**. The OpenAI wire format is the common
+  denominator, so "agnostic" here means *write to one standard*, not *build
+  adapters*.
+- **Pure OpenAI-compatible shape.** One inference path for **all** backends,
+  including Ollama via its own `/v1` endpoint. This is the simplest shape; its
+  one cost is dropping the Ollama-only measured-fit feature (see below).
 
 This is a learning/architecture exercise; nothing here is required for the
-extension to function today.
+extension to function today. Ollama remains the zero-friction local default.
 
 ## Goal
 
-Make the one inference call backend-agnostic via OpenAI-compatible
-`/v1/chat/completions`, keeping Ollama the default and **preserving every
-privacy invariant** (local-only, metadata-only classification, value-free
-ledger, never-fill-secrets, fail-closed).
+One inference path via `{baseUrl}/v1/chat/completions` for every backend, with
+Ollama the default and **every privacy invariant preserved** (local-only,
+metadata-only classification, value-free ledger, never-fill secrets,
+fail-closed).
 
-## Scope
+## Key finding — disabling "thinking" over `/v1` is not uniform
 
-**In:**
-- A backend-neutral chat call targeting `{baseUrl}/v1/chat/completions`.
-- Map the existing classification JSON schema to OpenAI `response_format`.
-- Per-backend "thinking off" handling (we depend on thinking-off; see
-  [MODEL-BENCHMARK.md](./MODEL-BENCHMARK.md)).
-- Keep Ollama-native niceties (`/api/tags` model list, `/api/ps` measured GPU
-  fit) working when the backend is Ollama; hide/degrade gracefully otherwise.
+formfillm depends on **thinking-off** for reasoning models like qwen3.5
+(otherwise empty content + high latency; see [MODEL-BENCHMARK.md](./MODEL-BENCHMARK.md)).
+There is **no single standard OpenAI field** that disables reasoning across all
+backends:
 
-**Out (unchanged invariants / non-goals):**
-- No cloud providers, telemetry, analytics, or remote logging.
-- No change to the privacy model or the consent UI.
-- No multi-user logic inside the extension.
-- **Not** allowing non-localhost hosts by default — a LAN/centralized box is a
-  separate, explicit security decision (see Risks).
+| Backend | Per-request thinking-off | Over `/v1`? | `GET /v1/models`? |
+|---------|--------------------------|-------------|-------------------|
+| **Ollama** | `reasoning_effort:"none"` (native `think:false` is rejected on `/v1`) | ✅ yes | ✅ yes |
+| **vLLM** | `reasoning_effort:"none"` or `chat_template_kwargs:{enable_thinking:false}` | ✅ yes | ⚠️ not yet |
+| **llama.cpp** | none — server launch only (`--reasoning-budget 0`) | ❌ server-side | ✅ yes |
+| **SGLang** | `chat_template_kwargs:{enable_thinking:false}` (model-specific) | ⚠️ model-specific | ✅ yes |
 
-## Design sketch
+**Approach:** send `reasoning_effort:"none"` on every request — honored by the
+default Ollama backend (and vLLM), harmless on the others — and **document** that
+llama.cpp/SGLang operators disable reasoning **server-side**. (Sources: Ollama
+issues [#14820](https://github.com/ollama/ollama/issues/14820),
+[#15635](https://github.com/ollama/ollama/issues/15635),
+[#15288](https://github.com/ollama/ollama/issues/15288); vLLM
+[reasoning docs](https://docs.vllm.ai/en/latest/features/reasoning_outputs/);
+llama.cpp server README; SGLang OpenAI API docs. Version-sensitive.)
 
-- **One seam already exists:** `ollamaChat()` in
-  `src/background/service-worker.ts`. Generalize it (or add a sibling
-  `chatCompletion()`) that builds `{ model, messages, temperature,
-  response_format, stream:false }`, posts to `/v1/chat/completions`, and reads
-  `choices[0].message.content`. Keep the current `think:false` and
-  schema-then-plain-JSON retry semantics, plus the fail-closed `extractJson`
-  safety net.
-- **Capability split:** treat the model list (`/api/tags`) and measured fit
-  (`/api/ps` → `assessVramFit`) as **Ollama-only capabilities**. Invoke them
-  only when the backend is Ollama; otherwise the Settings panel shows a short
-  "not available for this backend" note instead of failing.
-- **Policy:** `src/shared/ollama-policy.ts` keeps host validation
-  (localhost-only by default) and cloud model-name rejection. Relax the
-  hard-coded `/api/...` path assumption and make the port configurable rather
-  than pinned to `11434`. `manifest.json` CSP `connect-src` + `host_permissions`
-  must list the allowed local origin(s).
+## Design
+
+- **Inference seam.** Replace `ollamaChat()` (`src/background/service-worker.ts`)
+  with `chatCompletion()` that POSTs to `${baseUrl}/v1/chat/completions`:
+  ```jsonc
+  {
+    "model": "...", "messages": [...], "temperature": 0, "stream": false,
+    "reasoning_effort": "none",
+    "response_format": { "type": "json_schema",
+      "json_schema": { "name": "classification", "strict": true,
+        "schema": /* CLASSIFICATION_JSON_SCHEMA */ } }
+  }
+  ```
+  Read `choices[0].message.content`. Keep the schema→plain-JSON retry and the
+  fail-closed `extractJson` safety net (`src/shared/classification-schema.ts`).
+- **Model list + reachability.** `GET /v1/models` replaces Ollama's `/api/tags`
+  (agnostic; shows "unavailable" on vLLM). It doubles as the reachability check
+  the status bar uses.
+- **Drop the `/api/ps` measured GPU/CPU fit** (no OpenAI equivalent): remove
+  `getLoadedModels` (service worker), `LoadedModelInfo` + `loaded[]` from
+  `TestOllamaResponse` (`src/shared/messages.ts`), the Settings "Measured GPU
+  fit" panel (`src/sidepanel/sidepanel.ts`), and `assessVramFit` + its tests
+  (now unused).
+- **Policy** (`src/shared/ollama-policy.ts`): keep local-only host validation
+  and cloud model-name rejection; relax `validateOllamaUrl` to accept a base URL
+  (the `/v1/...` path is appended in code) and stop hard-pinning port `11434`
+  (default stays `11434`).
+- **Manifest: unchanged for the default.** Ollama serves `/v1` on the same
+  `127.0.0.1:11434`, so `manifest.json` CSP `connect-src` + `host_permissions`
+  need **no edit**. A different backend port (e.g. llama-server `8080`) or a LAN
+  host is a **separate, explicit opt-in**, out of scope here.
 
 ## Tasks (ordered, each independently verifiable)
 
-1. Add the OpenAI-compatible request builder + response parser behind the
-   existing inference seam; map `CLASSIFICATION_JSON_SCHEMA` →
-   `response_format: { type: "json_schema", json_schema: {...} }`.
-2. Generalize "thinking off": keep `think:false` for Ollama; for OpenAI-style
-   backends omit it and document that llama.cpp/vLLM/SGLang disable reasoning at
-   **server launch** (e.g. llama.cpp `--reasoning-budget 0`).
-3. Settings: add an "API style" choice (Ollama-native vs OpenAI-compatible),
-   default Ollama-native; local-only validation unchanged.
-4. Gate `/api/tags` + `/api/ps` features behind the Ollama capability; graceful
-   empty state otherwise.
-5. `manifest.json`: parameterize the allowed local origin; default stays
-   `http://127.0.0.1:11434`. (Non-local host remains a separate opt-in.)
-6. Tests: `response_format` mapping; OpenAI response parsing; policy still
-   rejects remote hosts + cloud model names; capability gating.
-7. Docs: update `ARCHITECTURE.md` and `SECURITY.md` for the boundary; cross-link
-   `SCALING-LLM.md`.
+1. **Spike:** confirm Ollama `/v1/chat/completions` + `reasoning_effort:"none"` +
+   `response_format` returns valid, thinking-free classifications for the
+   qwen3.5 default — reuse the bench harness from the `MODEL-BENCHMARK.md` work.
+2. Add `chatCompletion()` and the `response_format` wrapper around
+   `CLASSIFICATION_JSON_SCHEMA`; swap the classifier/password-policy calls onto
+   it; keep retry + `extractJson`.
+3. Replace `/api/tags` with `GET /v1/models` for the model list + reachability.
+4. Remove the `/api/ps` measured-fit feature and its now-unused code/tests.
+5. Relax `validateOllamaUrl` (base URL, configurable port) — keep host local-only
+   + cloud rejection; update `tests/ollama-policy.test.ts`.
+6. Docs: update `ARCHITECTURE.md`, `SECURITY.md`, `README.md` from `/api/*` to
+   `/v1/*`; note server-side thinking-off for non-Ollama backends.
 
 ## Privacy / local-only
 
-- Using the OpenAI **wire format** against a **self-hosted/local** server is not
-  a cloud integration; `validateOllamaUrl` still blocks remote hosts and cloud
-  model names.
-- Pointing at a LAN box (the eventual shared server) is a **deliberate, separate
-  change** to host validation + CSP. Even then, classification sends **metadata
-  only — never stored profile values** — and the ledger stays value-free, so the
-  blast radius of widening the host is bounded by design.
+Unchanged. Using the OpenAI **wire format** against a **self-hosted/local**
+server is not a cloud integration; `validateOllamaUrl` still blocks remote hosts
+and cloud model names; classification stays **metadata-only — never stored
+values**; the ledger stays value-free. Pointing at a LAN box later is a
+**deliberate, separate** change to host validation + CSP.
 
 ## Risks / wrinkles
 
-- `response_format` support and strictness vary by backend; the fail-closed
-  `extractJson` + schema→JSON retry remain the safety net.
-- "Thinking" control is partly **server-side** (launch flags) and outside the
-  extension's reach — document for whoever operates the backend.
-- The crisp `/api/ps` VRAM-fit readout has no clean equivalent on non-Ollama
-  backends (llama-server `/props` reports total VRAM only), so that feature
-  necessarily degrades off Ollama.
+- Ollama `/v1` reasoning has known regressions on some models (#15635, #15288);
+  qwen3.5 is reported working — the task-1 spike de-risks this before any
+  refactor.
+- `response_format` / `strict` support varies by backend; the fail-closed parser
+  + retry remain the net.
+- The crisp measured GPU/CPU fit is Ollama-only and is intentionally dropped (no
+  OpenAI equivalent; llama-server `/props` reports total VRAM only).
 
-## Verification
+## Verification (of the eventual implementation)
 
 - `npm run typecheck && npm run lint && npm run test && npm run build` green.
-- Manual A/B: classify the same form via (a) the legacy Ollama `/api/chat` path
-  and (b) Ollama's OpenAI `/v1/chat/completions` path; confirm identical
-  classifications.
-- Confirm remote/cloud URLs and cloud model names are still rejected (tests).
+- A/B with the bench harness: same form via native `/api/chat` + `think:false`
+  vs `/v1/chat/completions` + `reasoning_effort:"none"` on Ollama → identical
+  classifications and similar latency.
+- Policy tests still reject remote hosts and cloud model names.
 
 ## Decision gate
 
-Do not start coding until the reviewer (project owner) confirms: **proceed to
-implement**, or **keep as a documented option**. Rationale and engine analysis:
-[SCALING-LLM.md](./SCALING-LLM.md).
+Do not start coding until the reviewer confirms: **proceed to implement**, or
+**keep as a documented option**.
