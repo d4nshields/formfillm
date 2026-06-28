@@ -138,12 +138,21 @@ the extension is just an OpenAI-compatible `/v1` client, every stage below is a
 - 16 GB comfortably holds a 4B at FP16 or a 7–14B quantized model **with real KV
   headroom** for modest concurrency — the point where SGLang/vLLM begin to earn
   their keep.
-- **Blackwell caveat (important):** the RTX 50-series is **sm_120** and needs a
-  very recent stack — **CUDA 12.8+/cu128**, recent PyTorch (2.6+/nightly), and
-  matching vLLM/SGLang builds. **Flash Attention 3 is not supported on Blackwell
-  yet → use FA2** (e.g. `VLLM_FLASH_ATTN_VERSION=2`). Expect setup friction until
-  stable wheels catch up; the CUDA 12.8 (cu128) containers are the smoothest
-  path.
+- **Both cards are first-class under CUDA 13.** The 4060 is Ada (`sm_89`) and the
+  5060 Ti is Blackwell (`sm_120`); CUDA 13 supports both (only much older archs
+  were dropped). A recent driver already exposes CUDA 13.x — note that
+  `nvidia-smi`'s "CUDA Version" is the driver's *maximum* supported runtime, not
+  an installed toolkit. SGLang now **defaults to CUDA 13** (`cu130`, PyTorch
+  2.9.x; CUDA 12.9/`cu129` still supported). So switching the 4060 for the 5060
+  Ti is **not** a CUDA-version compatibility problem.
+- **The real consideration is build freshness, not the CUDA version.** Ensure
+  PyTorch / SGLang / FlashInfer are built with `sm_120` kernels: use **current
+  `cu130` wheels or the official SGLang Docker image** (the docs steer Blackwell
+  users toward Docker) and don't pin old `cu128` builds. Some Blackwell rough
+  edges remain — mostly on large datacenter parts — so verify with current builds
+  when the card arrives, and if the attention backend errors, switch it
+  (FlashInfer ↔ FlashAttention). For day-to-day dev on either card, **Ollama**
+  ships its own runtime and just works on a CUDA 13 driver.
 
 **Stage 2 — dedicated LAN box for N workstations.**
 - A **fixed, known client count** makes sizing tractable: provision a bounded
@@ -202,10 +211,12 @@ Figures are version- and hardware-dependent; verify against current releases.
 - vLLM / PagedAttention: [Inside vLLM](https://vllm.ai/blog/anatomy-of-vllm),
   [vLLM repo](https://github.com/vllm-project/vllm).
 - SGLang vs vLLM: [benchmark](https://github.com/qiulang/vllm-sglang-perf).
-- SGLang on consumer GPUs / VRAM: [install guide](https://www.gpu-mart.com/blog/how-to-install-and-use-sglang),
-  [SGLang release notes (NVIDIA)](https://docs.nvidia.com/deeplearning/frameworks/sglang-release-notes/rel-25-10.html).
-- Blackwell (RTX 50-series, sm_120) support: vLLM issues
-  [#13306](https://github.com/vllm-project/vllm/issues/13306) /
-  [#14452](https://github.com/vllm-project/vllm/issues/14452), PyTorch sm_120
-  [#164342](https://github.com/pytorch/pytorch/issues/164342); and a survey of
-  private inference on consumer Blackwell GPUs ([arXiv:2601.09527](https://arxiv.org/html/2601.09527v1)).
+- SGLang install / CUDA: [install docs — "the major version of CUDA is 13 by default"](https://docs.sglang.io/get_started/install.html),
+  [SGLang Release 26.02 (NVIDIA, June 2026)](https://docs.nvidia.com/deeplearning/frameworks/sglang-release-notes/rel-26-02.html),
+  consumer-GPU [install guide](https://www.gpu-mart.com/blog/how-to-install-and-use-sglang).
+- Blackwell (RTX 50-series, `sm_120`): PyTorch sm_120 in stable
+  [#164342](https://github.com/pytorch/pytorch/issues/164342), SGLang Blackwell +
+  CUDA 13 [#13342](https://github.com/sgl-project/sglang/issues/13342). (Earlier
+  CUDA-12.8-era reports — vLLM [#13306](https://github.com/vllm-project/vllm/issues/13306)
+  / [#14452](https://github.com/vllm-project/vllm/issues/14452) — are now
+  historical.)
