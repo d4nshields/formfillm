@@ -997,7 +997,7 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       ...(hint ? [el("p", { class: "ff-note", text: hint })] : []),
     ]);
 
-  root.append(fieldRow("Ollama base URL", urlInput, "Local only: 127.0.0.1, localhost, or [::1]. Default port 11434 (other local ports also need a manifest CSP change)."));
+  root.append(fieldRow("Ollama base URL", urlInput, "Local only: 127.0.0.1 or localhost, any port (default 11434). Advanced: point at SGLang / llama-server / vLLM on another local port."));
 
   const modelWarning = el("p", { class: "ff-card-warning" });
   const refreshModelWarning = () => {

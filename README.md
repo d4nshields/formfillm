@@ -63,7 +63,11 @@ export OLLAMA_ORIGINS='chrome-extension://*'
 setx OLLAMA_ORIGINS "chrome-extension://*"
 ```
 
-formfillm only ever talks to `http://127.0.0.1:11434`, `http://localhost:11434`, or `http://[::1]:11434`. Remote Ollama hosts are rejected.
+formfillm only ever talks to a **local** server — `127.0.0.1` or `localhost` on any port (default `11434`). Remote and cloud hosts are always rejected (by both the URL policy and the manifest CSP).
+
+### Advanced: other local backends (SGLang, vLLM, llama.cpp)
+
+Ollama is the default and needs no setup. Because formfillm is just a client of the OpenAI-compatible `POST /v1/chat/completions`, advanced users can instead run any local server that speaks it — **SGLang**, **vLLM**, or **llama.cpp's `llama-server`** — and point formfillm at it in **Settings → Ollama base URL** (e.g. `http://127.0.0.1:30000` for SGLang). No rebuild needed: the manifest already permits any loopback port. Those engines *enforce* the JSON schema as a hard grammar (stronger than Ollama), and matter most for a shared many-user GPU box — see [docs/SCALING-LLM.md](./docs/SCALING-LLM.md) for the analysis and setup notes. Disable model "thinking" server-side there (e.g. SGLang `chat_template_kwargs`, llama.cpp `--reasoning-budget 0`); formfillm also sends `reasoning_effort:"none"`.
 
 ### 2. Build the extension
 
@@ -141,7 +145,7 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full design and [SECU
 
 Open **Settings** in the side panel:
 
-- **Ollama base URL** — default `http://127.0.0.1:11434`. Only localhost hosts (`127.0.0.1`/`localhost`/`[::1]`) are accepted; any local port is allowed (default 11434), so you can point at another local OpenAI-compatible server (e.g. SGLang on `:30000`). Note a non-default port also needs a matching `manifest.json` CSP `connect-src` entry.
+- **Ollama base URL** — default `http://127.0.0.1:11434`. Only localhost hosts (`127.0.0.1`/`localhost`) are accepted, on **any port** — so advanced users can point at another local OpenAI-compatible server (SGLang `:30000`, llama-server `:8080`, vLLM, …) with no rebuild. Remote/cloud hosts are always rejected.
 - **Model** — default `qwen3.5:4b`, the recommended minimum for ~8 GB VRAM. Larger, higher-performing models are fully usable if your GPU has the VRAM (see the model table above). The UI flags very large models as possibly slow/CPU-offloaded (e.g. `qwen3.5:27b`, `qwen3.5:35b`, `qwen3.5:122b`) and **rejects** cloud model names (e.g. `qwen3.5:cloud`).
 - **Temperature** — default `0` for consistent classification.
 - **Local-only enforcement** — locked on for this MVP.

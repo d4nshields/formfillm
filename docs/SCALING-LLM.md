@@ -182,9 +182,10 @@ two wrinkles were resolved.
 
 - **The seam is now `chatCompletion()`** in
   `src/background/service-worker.ts`, posting to `/v1/chat/completions`. Pointing
-  at a different local backend is a URL change (host stays localhost-only;
-  `validateOllamaUrl` allows any local port, and a non-default port also needs a
-  manifest CSP entry).
+  at a different local backend is a **pure config change** (host stays
+  localhost-only; both `validateOllamaUrl` and the manifest CSP/`host_permissions`
+  allow any loopback port, so SGLang `:30000` etc. work with no rebuild). A
+  remote/LAN host remains a separate, deliberate security step (§4).
 - **Two real wrinkles:**
   1. **Structured output mapping.** Ollama's native `format: <schema>` becomes
      OpenAI `response_format: { type: "json_schema", json_schema: {...} }`.

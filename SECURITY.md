@@ -43,8 +43,8 @@ Sending an entire personal profile to any model — even a local one — needles
 
 ## Defense in depth
 
-- **Manifest CSP** pins `connect-src` to the three local Ollama origins plus `'self'`, and disallows remote scripts (`script-src 'self'`), objects, and remote styles/fonts. Even a logic bug cannot reach a cloud endpoint.
-- **URL validation** rejects any non-local host, non-`http`, or non-`11434` port.
+- **Manifest CSP** scopes `connect-src` to the loopback hosts (`http://127.0.0.1:*`, `http://localhost:*`) plus `'self'`, and disallows remote scripts (`script-src 'self'`), objects, and remote styles/fonts. Any port is allowed so advanced users can run SGLang/vLLM/llama-server locally, but the host is **loopback only** — even a logic bug cannot reach the network or a cloud endpoint.
+- **URL validation** rejects any non-local host and any non-`http` transport (any local port is accepted; default `11434`).
 - **Model validation** rejects names containing `:cloud`, ending in `-cloud`, a standalone `cloud` token, URLs, or known hosted-provider tokens.
 - **Sensitivity floor** raises (never lowers) the model's sensitivity per category and forces secrets to `never_fill`.
 - **Password guard** in the content script refuses to fill `<input type="password">` regardless of instruction.

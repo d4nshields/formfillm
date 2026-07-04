@@ -111,7 +111,7 @@ decision.
 
 ## Why activeTab + dynamic injection
 
-The extension declares **no** static `content_scripts` and does **not** request `<all_urls>`. Instead it uses `activeTab` plus `chrome.scripting.executeScript`, so a scanner runs on a page **only** after the user opens formfillm on that page and clicks **Scan**. This minimizes the extension's reach: by default it can see and touch nothing. The only standing host permission is for the **local** Ollama origins — required so the background worker can reach your model, and granting no website access.
+The extension declares **no** static `content_scripts` and does **not** request `<all_urls>`. Instead it uses `activeTab` plus `chrome.scripting.executeScript`, so a scanner runs on a page **only** after the user opens formfillm on that page and clicks **Scan**. This minimizes the extension's reach: by default it can see and touch nothing. The only standing host permission is for the **local** loopback origins (`127.0.0.1`/`localhost`, any port) — required so the background worker can reach your local model server (Ollama by default), and granting no website access.
 
 ## Type contracts
 
@@ -128,7 +128,7 @@ Static files (`manifest.json`, `sidepanel.html`, `sidepanel.css`, `icons/`) are 
 
 ## Scaling the LLM backend (future)
 
-The inference call is funneled through a single `chatCompletion()` seam that speaks the OpenAI-compatible `POST /v1/chat/completions` wire format, so a future centralized GPU server (llama.cpp / vLLM / SGLang) is a **URL change, not a code change**. `validateOllamaUrl` allows any local port for exactly this reason (host stays localhost-only; a non-default port also needs a manifest CSP entry). See [docs/PLAN-backend-abstraction.md](./PLAN-backend-abstraction.md) for the implemented design and [docs/SCALING-LLM.md](./SCALING-LLM.md) for the concurrency analysis, engine tiers, and local-only caveats.
+The inference call is funneled through a single `chatCompletion()` seam that speaks the OpenAI-compatible `POST /v1/chat/completions` wire format, so a future centralized GPU server (llama.cpp / vLLM / SGLang) is a **URL change, not a code change**. `validateOllamaUrl` allows any local port for exactly this reason (host stays localhost-only; the manifest CSP `connect-src` + `host_permissions` cover loopback on any port, so no rebuild is needed to switch backends). See [docs/PLAN-backend-abstraction.md](./PLAN-backend-abstraction.md) for the implemented design and [docs/SCALING-LLM.md](./SCALING-LLM.md) for the concurrency analysis, engine tiers, and local-only caveats.
 
 ## Reference use
 

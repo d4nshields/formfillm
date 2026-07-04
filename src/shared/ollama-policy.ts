@@ -5,12 +5,12 @@
  * server. These pure functions are the gatekeepers and are exercised hard by
  * the unit tests. They are intentionally conservative: when in doubt, reject.
  *
- * The host is restricted to localhost, but any local port is allowed so the
- * same OpenAI-compatible client can reach Ollama (11434), llama-server (8080),
- * SGLang (30000), etc. on the same machine. Defense in depth: the manifest CSP
- * `connect-src` still pins egress to the local origins on the DEFAULT port, so
- * even a bug here cannot reach the cloud — and pointing at a different local
- * port additionally requires a deliberate CSP change.
+ * The host is restricted to localhost, and any local port is allowed so the
+ * same OpenAI-compatible client can reach Ollama (11434), SGLang (30000),
+ * llama-server (8080), etc. on the same machine. Defense in depth: the manifest
+ * CSP `connect-src` + `host_permissions` are scoped to the loopback hosts
+ * (127.0.0.1/localhost) on ANY port — loopback only, so even a bug here can
+ * never reach the network or the cloud.
  */
 
 /** Hostnames we consider "local". Anything else is rejected outright. */
@@ -27,8 +27,8 @@ export type UrlValidation =
  * Accept only http://{localhost|127.0.0.1|[::1]}[:port] (trailing slash
  * tolerated). The host must be local; any port is allowed so one client can
  * reach Ollama / llama-server / SGLang on the same machine. Rejects remote
- * hosts and any non-http transport. (The manifest CSP is the harder gate and
- * still pins the default port; a different local port needs a CSP change too.)
+ * hosts and any non-http transport. (The manifest CSP + host_permissions are
+ * the harder gate and are scoped to the loopback hosts on any port.)
  */
 export function validateOllamaUrl(raw: string): UrlValidation {
   const input = (raw ?? "").trim();
@@ -58,8 +58,8 @@ export function validateOllamaUrl(raw: string): UrlValidation {
     };
   }
 
-  // Any port is accepted for a local host (default remains 11434). The CSP
-  // pins the default; other local ports are a deliberate CSP opt-in.
+  // Any port is accepted for a local host (default remains 11434); the manifest
+  // CSP + host_permissions cover loopback on any port.
 
   if (url.pathname !== "/" && url.pathname !== "") {
     return { ok: false, reason: "Provide only the base URL (no path), e.g. http://127.0.0.1:11434." };
