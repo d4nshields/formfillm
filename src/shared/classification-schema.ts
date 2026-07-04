@@ -173,6 +173,57 @@ export function validateClassificationResponse(
   return { classifications, errors };
 }
 
+function tryParse(s: string): unknown | null {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort repair of JSON a model left unclosed or truncated. Some backends
+ * (notably Ollama's OpenAI-compatible `/v1`, which does not grammar-enforce the
+ * schema) will emit an array of complete objects but drop the trailing `]`, or
+ * cut off mid-object. We recover the already-complete leading items rather than
+ * fail-closing every field. Input must start at the first `{`/`[`.
+ */
+function balanceAndParse(s: string): unknown | null {
+  // 1) Append closers for any brackets left open (respecting string literals).
+  const stack: string[] = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  if (stack.length || inStr) {
+    let repaired = inStr ? `${s}"` : s;
+    repaired = repaired.replace(/,\s*$/, "");
+    for (let i = stack.length - 1; i >= 0; i--) repaired += stack[i] === "{" ? "}" : "]";
+    const parsed = tryParse(repaired);
+    if (parsed !== null) return parsed;
+  }
+  // 2) Array with a truncated final object: keep items up to the last complete
+  //    "}", then close the array.
+  if (s[0] === "[") {
+    const lastObj = s.lastIndexOf("}");
+    if (lastObj > 0) {
+      const parsed = tryParse(`${s.slice(0, lastObj + 1)}]`);
+      if (parsed !== null) return parsed;
+    }
+  }
+  return null;
+}
+
 /**
  * Extract a JSON object from a model string that may include stray prose or
  * code fences. Returns the parsed value or null. Mirrors a robust-extraction
@@ -180,11 +231,9 @@ export function validateClassificationResponse(
  */
 export function extractJson(content: string): unknown | null {
   const trimmed = content.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // Fall through to bracket extraction.
-  }
+  const whole = tryParse(trimmed);
+  if (whole !== null) return whole;
+
   // Try the outermost {...} object or [...] array block, whichever starts
   // first (models may return a bare array, sometimes wrapped in prose/fences).
   const candidates: Array<[number, number]> = [];
@@ -196,11 +245,12 @@ export function extractJson(content: string): unknown | null {
   if (as >= 0 && ae > as) candidates.push([as, ae]);
   candidates.sort((a, b) => a[0] - b[0]);
   for (const [s, e] of candidates) {
-    try {
-      return JSON.parse(trimmed.slice(s, e + 1));
-    } catch {
-      // try the next candidate
-    }
+    const parsed = tryParse(trimmed.slice(s, e + 1));
+    if (parsed !== null) return parsed;
   }
+
+  // Final fallback: repair JSON the model left unclosed/truncated.
+  const start = trimmed.search(/[[{]/);
+  if (start >= 0) return balanceAndParse(trimmed.slice(start));
   return null;
 }

@@ -111,4 +111,27 @@ describe("extractJson", () => {
     expect(extractJson('[{"a":1},{"a":2}]')).toEqual([{ a: 1 }, { a: 2 }]);
     expect(extractJson('```json\n[{"a":1}]\n```')).toEqual([{ a: 1 }]);
   });
+
+  it("repairs an array of complete objects missing the closing bracket", () => {
+    // Ollama's /v1 response_format does not grammar-enforce closure, so the
+    // model can end an otherwise-complete array without the final "]".
+    expect(extractJson('[{"fieldId":"a","sensitivity":"low"},{"fieldId":"b","sensitivity":"secret"}')).toEqual([
+      { fieldId: "a", sensitivity: "low" },
+      { fieldId: "b", sensitivity: "secret" },
+    ]);
+  });
+
+  it("repairs an unclosed object (missing closing brace)", () => {
+    expect(extractJson('{"fieldId":"a","sensitivity":"low"')).toEqual({ fieldId: "a", sensitivity: "low" });
+  });
+
+  it("recovers complete leading items when the final object is truncated", () => {
+    // Keeps the two complete entries, drops the half-written third.
+    expect(
+      extractJson('[{"fieldId":"a","sensitivity":"low"},{"fieldId":"b","sensitivity":"high"},{"fieldId":"c","sensi'),
+    ).toEqual([
+      { fieldId: "a", sensitivity: "low" },
+      { fieldId: "b", sensitivity: "high" },
+    ]);
+  });
 });
