@@ -134,20 +134,11 @@ export interface ClassifyResponse {
   errors?: string[];
   error?: string;
 }
-/** A model currently resident in Ollama, with its measured GPU/total footprint. */
-export interface LoadedModelInfo {
-  name: string;
-  /** Total loaded bytes (weights + context buffers). */
-  size: number;
-  /** Bytes resident in GPU VRAM. Equal to `size` means fully on GPU. */
-  sizeVram: number;
-}
 export interface TestOllamaResponse {
   ok: boolean;
   reachable: boolean;
+  /** Installed model ids from the OpenAI-compatible GET /v1/models. */
   models?: string[];
-  /** Models loaded right now (from /api/ps), for measured-fit display. */
-  loaded?: LoadedModelInfo[];
   current?: string;
   error?: string;
 }

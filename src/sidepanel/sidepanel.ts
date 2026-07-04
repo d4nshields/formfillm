@@ -24,7 +24,6 @@ import type { FieldClassification, FieldMetadata, LedgerEntry, Profile, Settings
 import { PROFILE_KEYS } from "../shared/types.js";
 import {
   assessModel,
-  assessVramFit,
   FALLBACK_MODELS,
   RECOMMENDED_MODEL,
   validateModelName,
@@ -998,7 +997,7 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       ...(hint ? [el("p", { class: "ff-note", text: hint })] : []),
     ]);
 
-  root.append(fieldRow("Ollama base URL", urlInput, "Local only: 127.0.0.1, localhost, or [::1] on port 11434."));
+  root.append(fieldRow("Ollama base URL", urlInput, "Local only: 127.0.0.1, localhost, or [::1]. Default port 11434 (other local ports also need a manifest CSP change)."));
 
   const modelWarning = el("p", { class: "ff-card-warning" });
   const refreshModelWarning = () => {
@@ -1010,7 +1009,7 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       modelWarning.textContent = `⚠ ${a.warning}`;
       modelWarning.className = "ff-card-warning";
     } else if (a.fit === "recommended") {
-      modelWarning.textContent = `✓ Recommended default — small and fast. Actual GPU fit is measured when it's loaded (see Test Ollama connection).`;
+      modelWarning.textContent = `✓ Recommended default — small and fast, fits an 8 GB GPU fully.`;
       modelWarning.className = "ff-card-warning ff-ok";
     } else {
       modelWarning.textContent = "";
@@ -1051,7 +1050,7 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
     el("pre", { class: "ff-cmd", text: FALLBACK_MODELS.map((m) => `ollama pull ${m}`).join("\n") }),
     el("p", {
       class: "ff-note",
-      text: "Larger models give higher quality but may be partially offloaded to CPU (slower). formfillm can't read your GPU directly — use Test Ollama connection below to measure the actual GPU/CPU split for whatever you load.",
+      text: "Larger models give higher quality but need more VRAM; anything that doesn't fit your GPU is offloaded to CPU and runs slower. Pick the biggest that fits your card.",
     }),
   ]);
   root.append(ref);
@@ -1090,32 +1089,6 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       }
       testResult.append(ul);
     }
-
-    // Measured GPU/CPU split for whatever is loaded right now (from /api/ps).
-    const loaded = res.loaded ?? [];
-    const fitWrap = el("div", { class: "ff-fit" }, [el("h3", { text: "Measured GPU fit" })]);
-    if (loaded.length) {
-      for (const lm of loaded) {
-        const fit = assessVramFit(lm.size, lm.sizeVram);
-        const cls =
-          fit.severity === "ok" ? "ff-note ff-ok" : fit.severity === "warn" ? "ff-note ff-card-warning" : "ff-note ff-muted";
-        fitWrap.append(el("p", { class: cls, text: `${lm.name}: ${fit.label}` }));
-      }
-      fitWrap.append(
-        el("p", {
-          class: "ff-note ff-muted",
-          text: "Measured from Ollama /api/ps — no hardware assumptions. Anything on CPU is what slows generation.",
-        }),
-      );
-    } else {
-      fitWrap.append(
-        el("p", {
-          class: "ff-note ff-muted",
-          text: "No model is loaded yet, so there's nothing to measure. Run a scan with your selected model, then Test again to see its real GPU/CPU split.",
-        }),
-      );
-    }
-    testResult.append(fitWrap);
   };
   root.append(
     el("div", { class: "ff-actions" }, [button("Test Ollama connection", () => void doTest(), { class: "ff-btn" })]),

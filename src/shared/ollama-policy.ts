@@ -2,27 +2,33 @@
  * formfillm — Ollama local-only policy
  *
  * The entire privacy promise rests on never talking to anything but a local
- * Ollama. These pure functions are the gatekeepers and are exercised hard by
+ * server. These pure functions are the gatekeepers and are exercised hard by
  * the unit tests. They are intentionally conservative: when in doubt, reject.
  *
- * Defense in depth: the manifest CSP `connect-src` also pins network egress to
- * the three local origins below, so even a bug here cannot reach the cloud.
+ * The host is restricted to localhost, but any local port is allowed so the
+ * same OpenAI-compatible client can reach Ollama (11434), llama-server (8080),
+ * SGLang (30000), etc. on the same machine. Defense in depth: the manifest CSP
+ * `connect-src` still pins egress to the local origins on the DEFAULT port, so
+ * even a bug here cannot reach the cloud — and pointing at a different local
+ * port additionally requires a deliberate CSP change.
  */
 
 /** Hostnames we consider "local". Anything else is rejected outright. */
 export const ALLOWED_OLLAMA_HOSTS = ["127.0.0.1", "localhost", "[::1]", "::1"] as const;
 
-/** The Ollama default port. Pinned to match the manifest CSP connect-src. */
-export const ALLOWED_OLLAMA_PORT = "11434";
+/** The Ollama default port, used as the settings default and in CSP. */
+export const DEFAULT_OLLAMA_PORT = "11434";
 
 export type UrlValidation =
   | { ok: true; normalized: string }
   | { ok: false; reason: string };
 
 /**
- * Accept only http://{localhost|127.0.0.1|[::1]}:11434 (trailing slash
- * tolerated). Rejects remote hosts, https to remote, and non-default ports
- * (the CSP only allows :11434, so other ports could not connect anyway).
+ * Accept only http://{localhost|127.0.0.1|[::1]}[:port] (trailing slash
+ * tolerated). The host must be local; any port is allowed so one client can
+ * reach Ollama / llama-server / SGLang on the same machine. Rejects remote
+ * hosts and any non-http transport. (The manifest CSP is the harder gate and
+ * still pins the default port; a different local port needs a CSP change too.)
  */
 export function validateOllamaUrl(raw: string): UrlValidation {
   const input = (raw ?? "").trim();
@@ -52,13 +58,8 @@ export function validateOllamaUrl(raw: string): UrlValidation {
     };
   }
 
-  const port = url.port || "";
-  if (port !== ALLOWED_OLLAMA_PORT) {
-    return {
-      ok: false,
-      reason: `Port "${port || "(default)"}" is not allowed. Use the Ollama port ${ALLOWED_OLLAMA_PORT}.`,
-    };
-  }
+  // Any port is accepted for a local host (default remains 11434). The CSP
+  // pins the default; other local ports are a deliberate CSP opt-in.
 
   if (url.pathname !== "/" && url.pathname !== "") {
     return { ok: false, reason: "Provide only the base URL (no path), e.g. http://127.0.0.1:11434." };
@@ -217,37 +218,4 @@ export function assessModel(raw: string): ModelAssessment {
   }
 
   return { cloudRejected: false, fit: "supported", paramBillions, warning: null };
-}
-
-// ---------------------------------------------------------------------------
-// Measured VRAM fit (from Ollama /api/ps) — the real signal, no assumptions.
-// ---------------------------------------------------------------------------
-
-export interface VramFit {
-  /** Fraction of the loaded model resident OUTSIDE the GPU (0 = fully on GPU). */
-  offloadFraction: number;
-  fullyOnGpu: boolean;
-  /** Short UI label, e.g. "Fully on GPU — fast" or "23% on CPU — slower". */
-  label: string;
-  severity: "ok" | "warn" | "unknown";
-}
-
-/**
- * Assess how a *loaded* model actually fits, from Ollama's /api/ps figures:
- * `size` is the total loaded footprint (weights + KV/context buffers) and
- * `sizeVram` the bytes resident in the GPU. This is measured truth — Ollama
- * exposes no total-VRAM/hardware endpoint, but anything offloaded to CPU here
- * is exactly what makes generation slow.
- */
-export function assessVramFit(size: number, sizeVram: number): VramFit {
-  if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(sizeVram) || sizeVram < 0) {
-    return { offloadFraction: 0, fullyOnGpu: false, label: "Fit unknown", severity: "unknown" };
-  }
-  const onGpu = Math.min(sizeVram, size);
-  const offloadFraction = Math.max(0, 1 - onGpu / size);
-  const pct = Math.round(offloadFraction * 100);
-  if (pct <= 0) {
-    return { offloadFraction: 0, fullyOnGpu: true, label: "Fully on GPU — fast", severity: "ok" };
-  }
-  return { offloadFraction, fullyOnGpu: false, label: `${pct}% on CPU — slower`, severity: "warn" };
 }

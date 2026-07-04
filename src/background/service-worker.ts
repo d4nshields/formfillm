@@ -4,7 +4,9 @@
  * Responsibilities:
  *  - Configure the side panel to open on action click.
  *  - Route messages between the side panel and the injected content script.
- *  - Call the LOCAL Ollama service (and nothing else) for classification.
+ *  - Call a LOCAL model server (and nothing else) for classification, via the
+ *    OpenAI-compatible /v1 endpoint (Ollama by default). See
+ *    docs/PLAN-backend-abstraction.md.
  *  - Enforce local-only URL/model policy and fail closed.
  *
  * Privacy notes:
@@ -19,7 +21,6 @@ import {
   parseMessage,
   type ApplyFillResponse,
   type ClassifyResponse,
-  type LoadedModelInfo,
   type Message,
   type ParsePasswordPolicyResponse,
   type PasswordContext,
@@ -48,8 +49,6 @@ import { DEFAULT_SETTINGS, STORAGE_KEYS, type Settings } from "../shared/types.j
 // Cold model loads (especially when partly CPU-offloaded) can take a while,
 // so allow generous headroom before aborting.
 const OLLAMA_TIMEOUT_MS = 120_000;
-// Keep the model resident between calls to avoid repeated cold-load latency.
-const OLLAMA_KEEP_ALIVE = "30m";
 
 // Diagnostics, gated per channel in shared/debug-consts.ts. Logs appear in the
 // SERVICE WORKER console: chrome://extensions → formfillm → "Inspect views:
@@ -119,52 +118,70 @@ async function getSettings(): Promise<Settings> {
   };
 }
 
-// --- Ollama client (local only) --------------------------------------------
+// --- Chat client (local, OpenAI-compatible /v1) -----------------------------
 
-interface OllamaChatOptions {
+interface ChatOptions {
   baseUrl: string;
   model: string;
   temperature: number;
   jsonSchemaMode: boolean;
 }
 
-/** POST to the local Ollama /api/chat and return the raw message content. */
-async function ollamaChat(
-  opts: OllamaChatOptions,
+/** Wrap a JSON schema as an OpenAI `response_format` (json_schema). */
+function jsonSchemaFormat(name: string, schema: object) {
+  return { type: "json_schema" as const, json_schema: { name, strict: true, schema } };
+}
+
+/**
+ * POST to the local server's OpenAI-compatible /v1/chat/completions and return
+ * the raw message content. Works against any local backend that speaks the
+ * OpenAI wire format (Ollama by default; also llama-server, vLLM, SGLang).
+ * See docs/PLAN-backend-abstraction.md.
+ */
+async function chatCompletion(
+  opts: ChatOptions,
   system: string,
   user: string,
   schema: object,
-  forceJsonString: boolean,
+  schemaName: string,
+  forceJsonObject: boolean,
 ): Promise<string> {
-  const format = forceJsonString ? "json" : opts.jsonSchemaMode ? schema : "json";
+  // Structured output. `json_schema` when schema mode is on — enforced as a
+  // hard grammar by llama-server/vLLM/SGLang, and accepted-but-not-enforced by
+  // Ollama (which is why the prompt still pins the shape and validation fails
+  // closed). The forced retry and non-schema path use plain `json_object`.
+  const responseFormat =
+    forceJsonObject || !opts.jsonSchemaMode
+      ? { type: "json_object" as const }
+      : jsonSchemaFormat(schemaName, schema);
+
   const messages = [
     { role: "system", content: system },
     { role: "user", content: user },
   ];
 
-  // Disable model "thinking". Reasoning models (e.g. qwen3.x) otherwise spend
-  // their whole token budget on a hidden `thinking` field and return EMPTY
-  // `content` under constrained JSON output — which surfaces as "Ollama
-  // returned no content" — and are far slower. We want the JSON answer, not
-  // reasoning, so `think: false` is both a correctness and a speed fix.
-  const postChat = async (sendThink: boolean): Promise<Response> => {
+  // Disable model "thinking" via the OpenAI-standard field. Reasoning models
+  // (e.g. qwen3.x) otherwise spend their whole token budget on hidden reasoning
+  // and return EMPTY content under constrained JSON — slow and unusable, so
+  // this is both a correctness and a speed fix. Honored by Ollama + vLLM over
+  // /v1; harmless where ignored (llama.cpp/SGLang disable reasoning server-side).
+  const postChat = async (sendReasoning: boolean): Promise<Response> => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      olog("ollamaChat ✗ aborting after timeout", { ms: OLLAMA_TIMEOUT_MS });
+      olog("chatCompletion ✗ aborting after timeout", { ms: OLLAMA_TIMEOUT_MS });
       controller.abort();
     }, OLLAMA_TIMEOUT_MS);
     try {
-      return await fetch(`${opts.baseUrl}/api/chat`, {
+      return await fetch(`${opts.baseUrl}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
           model: opts.model,
           stream: false,
-          format,
-          ...(sendThink ? { think: false } : {}),
-          keep_alive: OLLAMA_KEEP_ALIVE,
-          options: { temperature: opts.temperature },
+          temperature: opts.temperature,
+          ...(sendReasoning ? { reasoning_effort: "none" } : {}),
+          response_format: responseFormat,
           messages,
         }),
       });
@@ -174,28 +191,28 @@ async function ollamaChat(
   };
 
   const startedAt = Date.now();
-  olog("ollamaChat → request", {
+  olog("chatCompletion → request", {
     model: opts.model,
-    format: typeof format === "string" ? format : "json-schema",
+    responseFormat: responseFormat.type,
     promptChars: system.length + user.length,
   });
 
   let resp: Response;
   try {
     resp = await postChat(true);
-    // A non-thinking model may reject the `think` flag (4xx mentioning think);
-    // retry once without it so fallback models still work.
+    // A backend/model that doesn't understand reasoning_effort may reject it
+    // (4xx mentioning "reasoning"); retry once without it so it still works.
     if (!resp.ok && resp.status >= 400 && resp.status < 500) {
       const peek = await resp.clone().text().catch(() => "");
-      if (/think/i.test(peek)) {
-        olog("ollamaChat ↺ retrying without think flag", { status: resp.status });
+      if (/reasoning/i.test(peek)) {
+        olog("chatCompletion ↺ retrying without reasoning_effort", { status: resp.status });
         resp = await postChat(false);
       }
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `Could not reach local Ollama at ${opts.baseUrl}. Is Ollama running? (${msg})`,
+      `Could not reach the local model server at ${opts.baseUrl}. Is it running? (${msg})`,
     );
   }
 
@@ -203,19 +220,19 @@ async function ollamaChat(
     const text = await resp.text().catch(() => "");
     if (resp.status === 403) {
       throw new Error(
-        "Ollama refused the request (403). Allow the extension origin by setting OLLAMA_ORIGINS to include chrome-extension origins (or '*'), then restart Ollama.",
+        "The local server refused the request (403). If using Ollama, allow the extension origin by setting OLLAMA_ORIGINS to include chrome-extension origins (or '*'), then restart Ollama.",
       );
     }
-    throw new Error(`Ollama returned ${resp.status}: ${text.slice(0, 200)}`);
+    throw new Error(`Local server returned ${resp.status}: ${text.slice(0, 200)}`);
   }
 
-  olog("ollamaChat ← response", { status: resp.status, ms: Date.now() - startedAt });
+  olog("chatCompletion ← response", { status: resp.status, ms: Date.now() - startedAt });
 
-  const data = (await resp.json()) as { message?: { content?: string } };
-  const content = data?.message?.content;
+  const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const content = data?.choices?.[0]?.message?.content;
   if (typeof content !== "string" || content.length === 0) {
     throw new Error(
-      "Ollama returned no content (a reasoning model may have emitted only hidden thinking).",
+      "The model returned no content (a reasoning model may have emitted only hidden thinking).",
     );
   }
   return content;
@@ -248,7 +265,7 @@ async function handleClassify(
     ...(page.title ? { title: page.title } : {}),
   });
 
-  const opts: OllamaChatOptions = {
+  const opts: ChatOptions = {
     baseUrl: url.normalized,
     model: settings.model,
     temperature: settings.temperature,
@@ -261,7 +278,7 @@ async function handleClassify(
   let lastError: string | undefined;
   for (let attempt = 0; attempt < 2 && parsed === null; attempt++) {
     try {
-      const content = await ollamaChat(opts, CLASSIFIER_SYSTEM_PROMPT, userPrompt, CLASSIFICATION_JSON_SCHEMA, attempt === 1);
+      const content = await chatCompletion(opts, CLASSIFIER_SYSTEM_PROMPT, userPrompt, CLASSIFICATION_JSON_SCHEMA, "field_classification", attempt === 1);
       parsed = extractJson(content);
       if (parsed === null) lastError = "Model output was not valid JSON.";
     } catch (e) {
@@ -276,29 +293,6 @@ async function handleClassify(
   return { ok: true, classifications: reconciled, ...(allErrors.length ? { errors: allErrors } : {}) };
 }
 
-/**
- * Read which models are loaded right now and how much of each sits in GPU VRAM
- * (Ollama /api/ps). This is the only reliable fit signal Ollama exposes — there
- * is no hardware/total-VRAM endpoint. Best-effort: returns [] on any failure.
- */
-async function getLoadedModels(baseUrl: string): Promise<LoadedModelInfo[]> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    const resp = await fetch(`${baseUrl}/api/ps`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!resp.ok) return [];
-    const data = (await resp.json()) as {
-      models?: Array<{ name?: string; size?: number; size_vram?: number }>;
-    };
-    return (data.models ?? [])
-      .filter((m): m is { name: string; size?: number; size_vram?: number } => typeof m.name === "string")
-      .map((m) => ({ name: m.name, size: Number(m.size ?? 0), sizeVram: Number(m.size_vram ?? 0) }));
-  } catch {
-    return [];
-  }
-}
-
 async function handleTestOllama(): Promise<TestOllamaResponse> {
   const settings = await getSettings();
   const url = validateOllamaUrl(settings.ollamaBaseUrl);
@@ -307,17 +301,18 @@ async function handleTestOllama(): Promise<TestOllamaResponse> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
-    const resp = await fetch(`${url.normalized}/api/tags`, { signal: controller.signal });
+    // OpenAI-compatible model list (Ollama/llama-server/SGLang expose it; vLLM
+    // may not). Doubles as the reachability check for the status line.
+    const resp = await fetch(`${url.normalized}/v1/models`, { signal: controller.signal });
     clearTimeout(timer);
     if (!resp.ok) {
-      return { ok: false, reachable: false, error: `Ollama returned ${resp.status}.`, current: settings.model };
+      return { ok: false, reachable: false, error: `Server returned ${resp.status}.`, current: settings.model };
     }
-    const data = (await resp.json()) as { models?: Array<{ name?: string }> };
-    const models = (data.models ?? [])
-      .map((m) => m.name)
+    const data = (await resp.json()) as { data?: Array<{ id?: string }> };
+    const models = (data.data ?? [])
+      .map((m) => m.id)
       .filter((n): n is string => typeof n === "string");
-    const loaded = await getLoadedModels(url.normalized);
-    return { ok: true, reachable: true, models, loaded, current: settings.model };
+    return { ok: true, reachable: true, models, current: settings.model };
   } catch (e) {
     return {
       ok: false,
@@ -348,7 +343,7 @@ async function handleParsePasswordPolicy(context: PasswordContext): Promise<Pars
   const model = validateModelName(settings.model);
   if (!url.ok || !model.ok) return { ok: true, policy: base };
 
-  const opts: OllamaChatOptions = {
+  const opts: ChatOptions = {
     baseUrl: url.normalized,
     model: settings.model,
     temperature: settings.temperature,
@@ -364,7 +359,7 @@ async function handleParsePasswordPolicy(context: PasswordContext): Promise<Pars
   try {
     let parsed: unknown = null;
     for (let attempt = 0; attempt < 2 && parsed === null; attempt++) {
-      const content = await ollamaChat(opts, PASSWORD_POLICY_SYSTEM_PROMPT, userPrompt, PASSWORD_POLICY_SCHEMA, attempt === 1);
+      const content = await chatCompletion(opts, PASSWORD_POLICY_SYSTEM_PROMPT, userPrompt, PASSWORD_POLICY_SCHEMA, "password_policy", attempt === 1);
       parsed = extractJson(content);
     }
     return { ok: true, policy: mergePolicyExtraction(base, parsed) };
