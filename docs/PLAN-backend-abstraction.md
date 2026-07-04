@@ -1,8 +1,8 @@
 # Plan — backend-agnostic inference via the OpenAI-compatible endpoint
 
-> **Status: PLANNED, not implemented. No code has been changed.**
-> A reviewable implementation plan only, so the decision to proceed can be made
-> deliberately. Rationale and engine analysis: [SCALING-LLM.md](./SCALING-LLM.md).
+> **Status: IMPLEMENTED** (commit `3355b6e`). The design below is the record of
+> what shipped; validated live against Ollama `/v1` before coding. Rationale and
+> engine analysis: [SCALING-LLM.md](./SCALING-LLM.md).
 
 ## Context
 
@@ -130,7 +130,10 @@ values**; the ledger stays value-free. Pointing at a LAN box later is a
   classifications and similar latency.
 - Policy tests still reject remote hosts and cloud model names.
 
-## Decision gate
+## Decision gate — CLEARED
 
-Do not start coding until the reviewer confirms: **proceed to implement**, or
-**keep as a documented option**.
+Approved to implement (with `validateOllamaUrl` relaxed to localhost-only + any
+port). Shipped in commit `3355b6e`; the green gate passed (tsc 0, lint 0, 73
+tests, build ok). Remaining follow-up: pointing at a non-Ollama backend on a
+different local port (e.g. SGLang `:30000`) still needs a manifest CSP
+`connect-src` entry — a deliberate, separate change.

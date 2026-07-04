@@ -30,9 +30,9 @@ formfillm is a Manifest V3 Chrome extension split into three runtime contexts pl
 └──────────────────────────────────────────────────────────────┼──────┘
                                                                    │
                                                   ┌────────────────▼─────────────┐
-                                                  │  Local Ollama                 │
+                                                  │  Local model server (Ollama)  │
                                                   │  http://127.0.0.1:11434       │
-                                                  │  /api/chat, /api/tags         │
+                                                  │  /v1 (OpenAI-compatible)      │
                                                   └───────────────────────────────┘
 ```
 
@@ -45,7 +45,7 @@ formfillm is a Manifest V3 Chrome extension split into three runtime contexts pl
 4. content     → background  : { fields, page }            (metadata only)
 5. background  → side panel  : { fields, page }
 6. side panel  → background  : Classify { fields, page }   (NO profile)
-7. background  → Ollama       : /api/chat (system + metadata prompt)
+7. background  → model server : /v1/chat/completions (system + metadata prompt)
 8. Ollama      → background  : classifications (raw)
 9. background  → (validate + reconcile + fail-closed) → side panel
 10. user approves fields in the side panel
@@ -84,7 +84,7 @@ formfillm is a Manifest V3 Chrome extension split into three runtime contexts pl
 - `password.ts` — CSPRNG password generator, policy normalization, and LLM policy-extraction merge. Pure/testable.
 
 ### Background (`src/background/service-worker.ts`)
-Side-panel wiring, message routing, local Ollama client (timeout, 403 guidance, schema-then-JSON retry), policy enforcement. Holds no profile data.
+Side-panel wiring, message routing, local model-server client speaking the OpenAI-compatible `/v1/chat/completions` (timeout, 403 guidance, schema-then-JSON retry, `reasoning_effort:"none"` to disable thinking), policy enforcement. Holds no profile data.
 
 ### Content (`src/content/`)
 - `scanner.ts` — DOM → `FieldMetadata[]` + an in-page registry mapping `fieldId` → element refs (refs never leave the page).
@@ -128,7 +128,7 @@ Static files (`manifest.json`, `sidepanel.html`, `sidepanel.css`, `icons/`) are 
 
 ## Scaling the LLM backend (future)
 
-The inference call is funneled through a single `ollamaChat()` seam, which keeps the door open to a future centralized GPU server (llama.cpp / vLLM / SGLang) via the shared OpenAI-compatible endpoint. That is a forward-looking option, not a current requirement — see [docs/SCALING-LLM.md](./SCALING-LLM.md) for the concurrency analysis, engine tiers, and the local-only caveats.
+The inference call is funneled through a single `chatCompletion()` seam that speaks the OpenAI-compatible `POST /v1/chat/completions` wire format, so a future centralized GPU server (llama.cpp / vLLM / SGLang) is a **URL change, not a code change**. `validateOllamaUrl` allows any local port for exactly this reason (host stays localhost-only; a non-default port also needs a manifest CSP entry). See [docs/PLAN-backend-abstraction.md](./PLAN-backend-abstraction.md) for the implemented design and [docs/SCALING-LLM.md](./SCALING-LLM.md) for the concurrency analysis, engine tiers, and local-only caveats.
 
 ## Reference use
 

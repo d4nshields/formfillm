@@ -173,30 +173,35 @@ up **SGLang or vLLM on the 5060 Ti** to learn the serving side, then graduate to
 a **dedicated LAN box** once the workstation count justifies it — all behind the
 same `/v1` boundary, so the extension never changes.
 
-## 6. Appendix — if/when you do the backend-agnostic refactor
+## 6. Appendix — the backend-agnostic refactor (now implemented)
 
-Not implemented here; this is the map for later.
+**Update:** this refactor is **done** — see
+[PLAN-backend-abstraction.md](./PLAN-backend-abstraction.md). The extension now
+speaks the OpenAI-compatible `/v1` wire format; the notes below record how the
+two wrinkles were resolved.
 
-- **The seam is already clean:** all inference goes through `ollamaChat()` in
-  `src/background/service-worker.ts`. That is the one function to generalize.
+- **The seam is now `chatCompletion()`** in
+  `src/background/service-worker.ts`, posting to `/v1/chat/completions`. Pointing
+  at a different local backend is a URL change (host stays localhost-only;
+  `validateOllamaUrl` allows any local port, and a non-default port also needs a
+  manifest CSP entry).
 - **Two real wrinkles:**
   1. **Structured output mapping.** Ollama's native `format: <schema>` becomes
      OpenAI `response_format: { type: "json_schema", json_schema: {...} }`.
      Bonus: llama-server / vLLM / SGLang enforce the schema as a **hard grammar
      constraint** during sampling — stronger than Ollama 0.21.2, which (as we
      found) did not enforce ours. See `docs/MODEL-BENCHMARK.md`.
-  2. **"Thinking" control is per-backend.** formfillm relies on thinking-off
-     (`think:false`) for both correctness and speed. The equivalent differs by
-     engine: Ollama `think:false`; llama.cpp `--reasoning-budget 0`; vLLM/SGLang
-     via model/template args. (Caveat: llama.cpp disables grammar enforcement
-     when thinking is *on* — fine for us, since we run it off.)
-- **What stays Ollama-native and should degrade gracefully:** the Settings model
-  list (`/api/tags`) and the measured GPU/CPU fit (`/api/ps` → `assessVramFit` in
-  `src/shared/ollama-policy.ts`). These have no clean equivalent on a generic
-  OpenAI endpoint; treat them as Ollama-only conveniences that simply hide when
-  the backend isn't Ollama.
-- **Rough blast radius:** ~3–5 source files (`service-worker.ts`,
-  `ollama-policy.ts`, `messages.ts`, `sidepanel.ts`, `types.ts`) plus
+  2. **"Thinking" control is per-backend.** formfillm relies on thinking-off for
+     both correctness and speed. Resolved by sending the OpenAI-standard
+     `reasoning_effort: "none"` (honored by Ollama + vLLM over `/v1`; a defensive
+     retry drops it on a 4xx mentioning "reasoning"). Operators of llama.cpp
+     (`--reasoning-budget 0`) / SGLang disable reasoning **server-side**.
+- **What changed for the model list / fit readout:** the Settings model list now
+  uses the OpenAI `GET /v1/models` (was Ollama `/api/tags`). The measured GPU/CPU
+  fit (`/api/ps` → `assessVramFit`) had **no OpenAI equivalent and was dropped**,
+  not kept — a deliberate simplification for one code path across all backends.
+- **Actual blast radius:** 5 files (`service-worker.ts`, `ollama-policy.ts`,
+  `messages.ts`, `sidepanel.ts`, `tests/ollama-policy.test.ts`) plus
   `manifest.json` (CSP/port/host) if a non-localhost host is ever allowed.
 
 ## 7. Sources

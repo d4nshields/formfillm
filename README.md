@@ -43,7 +43,7 @@ ollama pull qwen3.5:9b      # higher quality, needs >8 GB VRAM
 ollama pull qwen2.5:7b      # legacy fallback
 ```
 
-These sizes are a guide, not a hard rule — Ollama can't report your total VRAM, but **Settings → Test Ollama connection** measures the real GPU/CPU split for whatever you load (from `/api/ps`), so you can confirm a model actually fits before relying on it. Anything that shows time on CPU there will be slower.
+These sizes are a guide, not a hard rule — pick the largest model that fits your GPU's VRAM. Anything that spills over onto the CPU runs noticeably slower, so if generation feels sluggish, drop to a smaller model.
 
 For measured latency-vs-quality numbers behind the `:4b` default (and why `:2b` isn't recommended despite being faster), see [docs/MODEL-BENCHMARK.md](./docs/MODEL-BENCHMARK.md).
 
@@ -51,7 +51,7 @@ Confirm your local models and API:
 
 ```bash
 ollama list
-curl http://127.0.0.1:11434/api/tags
+curl http://127.0.0.1:11434/v1/models   # OpenAI-compatible endpoint the extension uses
 ```
 
 **If the extension gets a `403` from Ollama**, allow the extension origin to call it and restart Ollama:
@@ -141,12 +141,12 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full design and [SECU
 
 Open **Settings** in the side panel:
 
-- **Ollama base URL** — default `http://127.0.0.1:11434`. Only localhost addresses on port 11434 are accepted.
+- **Ollama base URL** — default `http://127.0.0.1:11434`. Only localhost hosts (`127.0.0.1`/`localhost`/`[::1]`) are accepted; any local port is allowed (default 11434), so you can point at another local OpenAI-compatible server (e.g. SGLang on `:30000`). Note a non-default port also needs a matching `manifest.json` CSP `connect-src` entry.
 - **Model** — default `qwen3.5:4b`, the recommended minimum for ~8 GB VRAM. Larger, higher-performing models are fully usable if your GPU has the VRAM (see the model table above). The UI flags very large models as possibly slow/CPU-offloaded (e.g. `qwen3.5:27b`, `qwen3.5:35b`, `qwen3.5:122b`) and **rejects** cloud model names (e.g. `qwen3.5:cloud`).
 - **Temperature** — default `0` for consistent classification.
 - **Local-only enforcement** — locked on for this MVP.
 - **JSON-schema output** — on by default; falls back to robust JSON extraction + retry if the model doesn't honor it.
-- **Test Ollama connection** — lists locally installed models (click one to select it) and shows the **measured GPU/CPU split** for any currently-loaded model, read from Ollama's `/api/ps`. Ollama exposes no total-VRAM/hardware endpoint, so fit is measured from a real load rather than assumed — a model that shows time on CPU is what makes generation slow.
+- **Test Ollama connection** — confirms the local server is reachable and lists its installed models (from the OpenAI-compatible `GET /v1/models`); click one to select it.
 
 ---
 
