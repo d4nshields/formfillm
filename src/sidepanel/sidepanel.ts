@@ -1006,9 +1006,12 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
   ) as HTMLSelectElement;
   backendSelect.value = settings.backend;
   const backendHint = el("p", { class: "ff-note" });
+  // Set once the Test button exists (created below); label follows the backend.
+  let testBtn: HTMLElement | null = null;
   const currentProfile = () => BACKEND_PROFILES[backendSelect.value as BackendId] ?? BACKEND_PROFILES.ollama;
-  const refreshBackendHint = () => {
+  const refreshBackendUi = () => {
     backendHint.textContent = currentProfile().hint;
+    if (testBtn) testBtn.textContent = `Test ${currentProfile().label} connection`;
   };
   backendSelect.addEventListener("change", () => {
     // Switch the URL to this backend's default UNLESS the user typed a custom
@@ -1016,9 +1019,9 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
     const cur = urlInput.value.trim();
     const isProfileDefault = cur === "" || Object.values(BACKEND_PROFILES).some((q) => q.defaultBaseUrl === cur);
     if (isProfileDefault) urlInput.value = currentProfile().defaultBaseUrl;
-    refreshBackendHint();
+    refreshBackendUi();
   });
-  refreshBackendHint();
+  refreshBackendUi();
   root.append(fieldRow("Backend", backendSelect));
   root.append(backendHint);
 
@@ -1084,7 +1087,8 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
   const testResult = el("div", { class: "ff-test-result", attrs: { role: "status", "aria-live": "polite" } });
   const doTest = async () => {
     clear(testResult);
-    showBusy("Testing the Ollama connection…", "Querying installed models.");
+    const label = currentProfile().label;
+    showBusy(`Testing the ${label} connection…`, "Querying available models.");
     let res: TestOllamaResponse;
     try {
       res = await sendBg<TestOllamaResponse>({ type: MSG.TestOllama });
@@ -1092,17 +1096,18 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       hideBusy();
     }
     if (!res.reachable) {
-      testResult.append(el("p", { class: "ff-err", text: `Unreachable: ${res.error ?? "unknown error"}` }));
+      testResult.append(el("p", { class: "ff-err", text: `${label} unreachable: ${res.error ?? "unknown error"}` }));
       return;
     }
-    testResult.append(el("p", { class: "ff-ok", text: "Ollama reachable." }));
+    testResult.append(el("p", { class: "ff-ok", text: `${label} reachable.` }));
     const models = res.models ?? [];
-    if (!models.includes(RECOMMENDED_MODEL)) {
+    // The "recommended model" nudge is Ollama-specific (its pinned default + pull command).
+    if (backendSelect.value === "ollama" && !models.includes(RECOMMENDED_MODEL)) {
       testResult.append(el("p", { class: "ff-card-warning", text: `Recommended model ${RECOMMENDED_MODEL} not installed. Run:` }));
       testResult.append(el("pre", { class: "ff-cmd", text: `ollama pull ${RECOMMENDED_MODEL}` }));
     }
     if (models.length) {
-      testResult.append(el("h3", { text: "Installed models (click to select)" }));
+      testResult.append(el("h3", { text: "Available models (click to select)" }));
       const ul = el("div", { class: "ff-model-list" });
       for (const m of models) {
         const a = assessModel(m);
@@ -1115,9 +1120,8 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       testResult.append(ul);
     }
   };
-  root.append(
-    el("div", { class: "ff-actions" }, [button("Test Ollama connection", () => void doTest(), { class: "ff-btn" })]),
-  );
+  testBtn = button(`Test ${currentProfile().label} connection`, () => void doTest(), { class: "ff-btn" });
+  root.append(el("div", { class: "ff-actions" }, [testBtn]));
   root.append(testResult);
 
   // Save
