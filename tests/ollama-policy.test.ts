@@ -120,6 +120,14 @@ describe("assessModel recommendations", () => {
     expect(a.warning).toMatch(/pin/i);
   });
 
+  it("flags sub-4B models as below the tested minimum", () => {
+    const a = assessModel("qwen3.5:2b");
+    expect(a.cloudRejected).toBe(false);
+    expect(a.fit).toBe("below_min");
+    expect(a.paramBillions).toBe(2);
+    expect(a.warning).toMatch(/minimum|below/i);
+  });
+
   it("flags cloud models as rejected", () => {
     const a = assessModel("qwen3.5:cloud");
     expect(a.cloudRejected).toBe(true);

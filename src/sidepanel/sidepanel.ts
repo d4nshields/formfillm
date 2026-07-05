@@ -1035,8 +1035,10 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       modelWarning.textContent = `⛔ ${a.cloudReason}`;
       modelWarning.className = "ff-card-warning ff-err";
     } else if (a.warning) {
-      modelWarning.textContent = `⚠ ${a.warning}`;
-      modelWarning.className = "ff-card-warning";
+      // Below the tested minimum is a stronger signal than a "slow/large" note.
+      const belowMin = a.fit === "below_min";
+      modelWarning.textContent = `${belowMin ? "⛔" : "⚠"} ${a.warning}`;
+      modelWarning.className = "ff-card-warning" + (belowMin ? " ff-err" : "");
     } else if (a.fit === "recommended") {
       modelWarning.textContent = `✓ Recommended default — small and fast, fits an 8 GB GPU fully.`;
       modelWarning.className = "ff-card-warning ff-ok";

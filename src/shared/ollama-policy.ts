@@ -123,10 +123,10 @@ export function validateModelName(raw: string): ModelValidation {
 }
 
 // ---------------------------------------------------------------------------
-// Model size guidance for the target dev machine (RTX 4060, 8 GB VRAM).
+// Model size guidance for the 8 GB-VRAM minimum tier.
 // ---------------------------------------------------------------------------
 
-export type ModelFit = "recommended" | "supported" | "large" | "unpinned" | "unknown";
+export type ModelFit = "recommended" | "supported" | "large" | "below_min" | "unpinned" | "unknown";
 
 export interface ModelAssessment {
   /** True if the name is rejected as cloud/remote (see validateModelName). */
@@ -140,13 +140,20 @@ export interface ModelAssessment {
 }
 
 /**
- * The model pinned as recommended for the target machine. 4B fully fits an
- * 8 GB GPU; 9B measured at ~28% CPU offload on an RTX 4060, which is slow.
+ * The recommended model AND the minimum validated configuration. 4B fully fits
+ * an 8 GB GPU and passed QA; 9B measured ~28% CPU offload on 8 GB (slow).
  */
 export const RECOMMENDED_MODEL = "qwen3.5:4b";
 
-/** Fallback models, in order of preference, all expected to run locally. */
-export const FALLBACK_MODELS = ["qwen3.5:2b", "qwen2.5:7b"] as const;
+/**
+ * The smallest parameter count validated to work. Below this, models (e.g.
+ * qwen3.5:2b) produced malformed output that fail-closes every field, so we
+ * warn rather than present them as usable.
+ */
+export const MIN_PARAM_BILLIONS = 4;
+
+/** Fallback models above the minimum, in order of preference — run locally. */
+export const FALLBACK_MODELS = ["qwen2.5:7b"] as const;
 
 /** Models explicitly flagged as too large for an 8 GB GPU. */
 export const TOO_LARGE_MODELS = ["qwen3.5:27b", "qwen3.5:35b", "qwen3.5:122b"] as const;
@@ -205,6 +212,15 @@ export function assessModel(raw: string): ModelAssessment {
       fit: "unpinned",
       paramBillions,
       warning: `"${name}" has no pinned size tag. "latest"-style tags are not reproducible — pin a size such as ${RECOMMENDED_MODEL}.`,
+    };
+  }
+
+  if (paramBillions < MIN_PARAM_BILLIONS) {
+    return {
+      cloudRejected: false,
+      fit: "below_min",
+      paramBillions,
+      warning: `"${name}" (~${paramBillions}B) is below the tested minimum of ${MIN_PARAM_BILLIONS}B — smaller models produced malformed output in testing and can fail-close every field. Use ${RECOMMENDED_MODEL} or larger.`,
     };
   }
 

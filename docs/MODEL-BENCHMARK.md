@@ -5,9 +5,10 @@
 entirely token generation. `:2b` is ~1.5× faster per token, but on this task it
 was **unreliable** (it emitted malformed JSON that fail-closes every field to
 "manual review") and, when it does parse, rates sensitivity more coarsely. `:4b`
-classified **10/10 fields correctly and deterministically**. We keep `:4b` as
-the default. The benchmarking also surfaced and fixed a correctness bug and an
-output-size optimization (details below).
+classified **10/10 fields correctly and deterministically**. **`qwen3.5:4b` is
+therefore the minimum validated configuration** — all QA passed on `:4b`, while
+`:2b` errored — and it is the pinned default. The benchmarking also surfaced and
+fixed a correctness bug and an output-size optimization (details below).
 
 ## Test environment
 
@@ -116,8 +117,9 @@ intent.
 
 ## Decision & justification
 
-**Keep `qwen3.5:4b` as the default; `:2b` remains an optional fast fallback,
-not recommended.**
+**`qwen3.5:4b` is the minimum validated configuration and the default. `:2b` is
+not supported** — it produced errors (malformed output) and no successful QA was
+done on it.
 
 - **Correctness over ~1.8 s.** After the optimization, `:4b` is only ~1.8 s
   slower than `:2b` per form, and it classifies 10/10 deterministically with
@@ -129,11 +131,13 @@ not recommended.**
   review" — defeats that purpose, even if it's faster.
 - **`:4b` fits the 8 GB minimum fully** (0 % CPU offload) and now runs a full
   10-field form in ~9 s. Larger/faster GPUs can run bigger qwen3.5 variants for
-  higher quality; smaller setups can fall back to `:2b` understanding the
-  reliability trade-off.
+  higher quality. There is **no supported smaller fallback** — below ~4B,
+  reliability collapses. Accordingly, `assessModel` (`src/shared/ollama-policy.ts`)
+  flags any sub-4B model as **below the tested minimum**, and Settings shows a
+  clear warning.
 
-Users can always change the model in **Settings**, and **Settings → Test Ollama
-connection** reports the measured GPU/CPU split for whatever they load.
+Users can always change the model in **Settings**; a sub-4B choice is warned
+about but not hard-blocked (fail-closed classification still protects secrets).
 
 ---
 
