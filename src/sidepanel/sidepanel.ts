@@ -20,8 +20,9 @@ import {
   type ScanPageResponse,
   type TestOllamaResponse,
 } from "../shared/messages.js";
-import type { FieldClassification, FieldMetadata, LedgerEntry, Profile, Settings } from "../shared/types.js";
+import type { BackendId, FieldClassification, FieldMetadata, LedgerEntry, Profile, Settings } from "../shared/types.js";
 import { PROFILE_KEYS } from "../shared/types.js";
+import { BACKEND_PROFILES } from "../shared/inference/profiles.js";
 import {
   assessModel,
   FALLBACK_MODELS,
@@ -997,7 +998,31 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
       ...(hint ? [el("p", { class: "ff-note", text: hint })] : []),
     ]);
 
-  root.append(fieldRow("Ollama base URL", urlInput, "Local only: 127.0.0.1 or localhost, any port (default 11434). Advanced: point at SGLang / llama-server / vLLM on another local port."));
+  // Backend picker — selects a profile (default URL + how to disable thinking).
+  const backendSelect = el(
+    "select",
+    { class: "ff-input", attrs: { id: "set-backend" } },
+    Object.values(BACKEND_PROFILES).map((p) => el("option", { attrs: { value: p.id }, text: p.label })),
+  ) as HTMLSelectElement;
+  backendSelect.value = settings.backend;
+  const backendHint = el("p", { class: "ff-note" });
+  const currentProfile = () => BACKEND_PROFILES[backendSelect.value as BackendId] ?? BACKEND_PROFILES.ollama;
+  const refreshBackendHint = () => {
+    backendHint.textContent = currentProfile().hint;
+  };
+  backendSelect.addEventListener("change", () => {
+    // Switch the URL to this backend's default UNLESS the user typed a custom
+    // one (i.e. it isn't empty and isn't another profile's default).
+    const cur = urlInput.value.trim();
+    const isProfileDefault = cur === "" || Object.values(BACKEND_PROFILES).some((q) => q.defaultBaseUrl === cur);
+    if (isProfileDefault) urlInput.value = currentProfile().defaultBaseUrl;
+    refreshBackendHint();
+  });
+  refreshBackendHint();
+  root.append(fieldRow("Backend", backendSelect));
+  root.append(backendHint);
+
+  root.append(fieldRow("Base URL", urlInput, "Local only: 127.0.0.1 or localhost, any port. Ollama defaults to 11434, SGLang to 30000."));
 
   const modelWarning = el("p", { class: "ff-card-warning" });
   const refreshModelWarning = () => {
@@ -1112,6 +1137,7 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
     let temp = Number(tempInput.value);
     if (!Number.isFinite(temp) || temp < 0) temp = 0;
     settings = {
+      backend: backendSelect.value as BackendId,
       ollamaBaseUrl: url.normalized,
       model: modelInput.value.trim(),
       temperature: temp,

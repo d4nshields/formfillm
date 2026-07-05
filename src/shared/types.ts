@@ -197,20 +197,30 @@ export interface LedgerEntry {
 }
 
 // ---------------------------------------------------------------------------
-// Settings — Ollama config and local-only enforcement.
+// Settings — local model-server config and local-only enforcement.
 // ---------------------------------------------------------------------------
 
+/**
+ * Which local, OpenAI-compatible model server to talk to. All speak the same
+ * `/v1` wire format; the id selects a BackendProfile (default URL + how to
+ * disable "thinking"). See src/shared/inference/profiles.ts and docs/backends/.
+ */
+export type BackendId = "ollama" | "sglang" | "vllm" | "llamacpp";
+
 export interface Settings {
+  /** Which local backend profile to use (default "ollama"). */
+  backend: BackendId;
   ollamaBaseUrl: string;
   model: string;
   temperature: number;
   /** Locked on for the MVP — surfaced in UI but not user-disablable. */
   localOnly: true;
-  /** Use Ollama structured/JSON output mode when supported. */
+  /** Prefer json_schema structured output when the backend supports it. */
   jsonSchemaMode: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  backend: "ollama",
   ollamaBaseUrl: "http://127.0.0.1:11434",
   // 4B fully fits an 8 GB GPU (e.g. RTX 4060); 9B spills ~28% to CPU and is slow.
   model: "qwen3.5:4b",
