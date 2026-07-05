@@ -7,7 +7,7 @@ formfillm's purpose is **personal information protection through local-only, con
 1. **Local only.** The only network destination is a local Ollama instance (`127.0.0.1`, `localhost`, or `[::1]` on port `11434`). There are no cloud LLMs, hosted APIs, analytics, telemetry, remote logging, CDN scripts, or external fonts.
 2. **Metadata-only classification.** The model is given form field *metadata* (labels, types, options, nearby text). It is **never** given your stored profile values.
 3. **Consent before disclosure.** Nothing is filled until you approve it, field by field. Low-sensitivity fields can be batch-approved only after the exact values are shown.
-4. **Fail closed.** If classification fails or is malformed, fields default to `unknown` / `manual_review`. Secrets are never fillable.
+4. **Fail closed.** If classification fails or is malformed, fields default to `unknown` / `manual_review`. Stored secrets are never fillable — a password field only ever accepts a locally generated, never-stored password (see below).
 5. **No value persistence.** The disclosure ledger stores categories and decisions, never values.
 
 ## What data is scanned

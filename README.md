@@ -6,7 +6,7 @@ formfillm is a Manifest V3 Chrome extension that helps you fill web forms — bu
 
 - **Local only.** No cloud LLMs, no hosted APIs, no telemetry, no analytics, no remote logging, no CDN scripts, no external fonts.
 - **Metadata-only classification.** The model sees form field *labels and structure*, never your stored profile values.
-- **Consent per field.** Approve, edit, skip, or mark-wrong each field. Secrets (passwords, SIN/SSN, 2FA, banking) are never filled.
+- **Consent per field.** Approve, edit, skip, or mark-wrong each field. Stored secrets (SIN/SSN, 2FA, banking) are never filled; a password field is only ever filled with a password formfillm generates locally at your request (below) — never a stored value.
 - **Disclosure ledger.** Records *categories and decisions* — never actual values.
 - **Local password generation.** For sign-up forms it can generate a strong password (Web Crypto CSPRNG) that meets the site's stated rules, fill it, and hand off to your password manager — the password is shown, copyable, and **never stored** by formfillm.
 - **Never submits.** formfillm fills fields and highlights them; you review and submit yourself.
@@ -45,7 +45,7 @@ ollama pull qwen2.5:7b      # legacy fallback
 
 These sizes are a guide, not a hard rule — pick the largest model that fits your GPU's VRAM. Anything that spills over onto the CPU runs noticeably slower, so if generation feels sluggish, drop to a smaller model.
 
-For measured latency-vs-quality numbers behind the `:4b` default (and why `:2b` isn't recommended despite being faster), see [docs/MODEL-BENCHMARK.md](./docs/MODEL-BENCHMARK.md).
+For measured latency-vs-quality numbers behind the `:4b` default (and why `:2b`, though faster, proved unreliable here — malformed output that fail-closes every field), see [docs/MODEL-BENCHMARK.md](./docs/MODEL-BENCHMARK.md).
 
 Confirm your local models and API:
 
@@ -89,7 +89,7 @@ npm run build      # outputs dist/
 2. Click the **formfillm** toolbar icon to open the side panel (this grants `activeTab` access to that page).
 3. Click **Scan this page**.
 4. formfillm walks you through the form **one field at a time** ("Field 2 of 6"). For each field it shows a plain-language explanation, the sensitivity, and — when you have a matching saved value — exactly what it would fill.
-5. For each field choose: **Yes, fill it** (fills that field immediately and moves on), **Edit** / **Type it in** (enter or override the value, then fill), **Skip**, or **This looks wrong**. Secret fields (SIN/SSN, etc.) are shown but never filled. **New-password fields** offer **Generate strong password** — formfillm reads the site's rules, generates a compliant password locally, fills it (and any confirm field), and shows it with a **Copy** button so you can save it in your password manager. Make sure your manager saves it on submit; formfillm never stores it.
+5. For each field choose: **Yes, fill it** (fills that field immediately and moves on), **Edit** / **Type it in** (enter or override the value, then fill), **Skip**, or **This looks wrong**. Sensitive fields like SIN/SSN and banking are shown but never filled. **New-password fields** are the one exception to that — they offer **Generate strong password**, where formfillm reads the site's rules, generates a compliant password locally, fills it (and any confirm field), and shows it with a **Copy** button so you can save it in your password manager. Make sure your manager saves it on submit; formfillm never stores it.
 6. Use **Back / Next** to move around — or **click any field directly on the page** and the wizard jumps straight to that field's step. At the end you get a **summary** of what was filled, skipped, and flagged.
 7. Review the filled values on the page and submit the form yourself — formfillm never submits.
 

@@ -142,7 +142,7 @@ For honest credit: common browser form-filling techniques — the label-resoluti
 | Profile → model | Full profile sent in the prompt | **Never** sent; metadata only |
 | Injection | Static `content_scripts` on `<all_urls>` | `activeTab` + on-demand `executeScript` |
 | Flow | One-click autofill | Per-field informed consent |
-| Secrets | Filled like any field | Detected, flagged, **never filled** |
+| Secrets | Filled like any field | Detected, flagged, **never filled from your data** (new-password fields: filled only with a locally generated, never-stored password) |
 | Language | Plain JS | Strict TypeScript |
 | Record | — | Value-free disclosure ledger |
 
