@@ -6,7 +6,7 @@
  * messages with `parseMessage` before acting; unrecognized shapes are ignored.
  */
 
-import type { FieldClassification, FieldMetadata } from "./types.js";
+import type { BackendId, FieldClassification, FieldMetadata } from "./types.js";
 
 export const MSG = {
   ScanPage: "formfillm/scan_page",
@@ -71,6 +71,12 @@ export interface ClassifyRequest {
 }
 export interface TestBackendRequest {
   type: typeof MSG.TestBackend;
+  /**
+   * Test the form's CURRENT (possibly unsaved) selection rather than the saved
+   * settings. Omitted (e.g. by the status bar) → test the saved backend.
+   */
+  backend?: BackendId;
+  baseUrl?: string;
 }
 export interface ApplyFillRequest {
   type: typeof MSG.ApplyFill;
@@ -179,7 +185,11 @@ export function parseMessage(raw: unknown): Message | null {
     case MSG.ScanPage:
       return { type, ...(typeof raw.tabId === "number" ? { tabId: raw.tabId } : {}) };
     case MSG.TestBackend:
-      return { type };
+      return {
+        type,
+        ...(typeof raw.backend === "string" ? { backend: raw.backend as BackendId } : {}),
+        ...(typeof raw.baseUrl === "string" ? { baseUrl: raw.baseUrl } : {}),
+      };
     case MSG.Ping:
       return { type };
     case MSG.RemoveOverlay:

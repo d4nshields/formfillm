@@ -1092,7 +1092,13 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
     showBusy(`Testing the ${label} connection…`, "Querying available models.");
     let res: TestBackendResponse;
     try {
-      res = await sendBg<TestBackendResponse>({ type: MSG.TestBackend });
+      // Test the form's CURRENT selection (backend + URL), not the saved
+      // settings — so the result matches the dropdown before you Save.
+      res = await sendBg<TestBackendResponse>({
+        type: MSG.TestBackend,
+        backend: backendSelect.value as BackendId,
+        baseUrl: urlInput.value.trim(),
+      });
     } finally {
       hideBusy();
     }
@@ -1102,10 +1108,17 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
     }
     testResult.append(el("p", { class: "ff-ok", text: `${label} reachable.` }));
     const models = res.models ?? [];
+    const currentModel = modelInput.value.trim();
     // The "recommended model" nudge is Ollama-specific (its pinned default + pull command).
     if (backendSelect.value === "ollama" && !models.includes(RECOMMENDED_MODEL)) {
       testResult.append(el("p", { class: "ff-card-warning", text: `Recommended model ${RECOMMENDED_MODEL} not installed. Run:` }));
       testResult.append(el("pre", { class: "ff-cmd", text: `ollama pull ${RECOMMENDED_MODEL}` }));
+    }
+    // Generic guard: the selected model isn't served by this backend (e.g. an
+    // Ollama name like "qwen3.5:4b" left over after switching to SGLang, which
+    // SGLang misreads as a LoRA adapter). Point them at a valid one.
+    if (models.length && currentModel && !models.includes(currentModel)) {
+      testResult.append(el("p", { class: "ff-card-warning ff-err", text: `Model "${currentModel}" isn't served by ${label} — pick one below, then Save.` }));
     }
     if (models.length) {
       testResult.append(el("h3", { text: "Available models (click to select)" }));

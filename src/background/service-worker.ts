@@ -188,15 +188,19 @@ async function handleClassify(
   return { ok: true, classifications: reconciled, ...(allErrors.length ? { errors: allErrors } : {}) };
 }
 
-async function handleTestBackend(): Promise<TestBackendResponse> {
+async function handleTestBackend(req: import("../shared/messages.js").TestBackendRequest): Promise<TestBackendResponse> {
   const settings = await getSettings();
-  const resolved = resolveBackend(settings);
-  if (!resolved.ok) return { ok: false, reachable: false, error: resolved.error };
+  // Test the form's current selection when provided (so the result matches the
+  // dropdown BEFORE Save); otherwise fall back to the saved settings.
+  const backend = req.backend ?? settings.backend;
+  const url = validateOllamaUrl(req.baseUrl ?? settings.ollamaBaseUrl);
+  if (!url.ok) return { ok: false, reachable: false, error: url.reason };
+  const client = new OpenAiChatBackend(url.normalized, backendProfile(backend));
 
   try {
     // listModels() throws when unreachable, and returns [] when reachable but
     // the backend exposes no list (e.g. some vLLM builds).
-    const models = await resolved.backend.listModels();
+    const models = await client.listModels();
     return { ok: true, reachable: true, models, current: settings.model };
   } catch (e) {
     return {
@@ -335,7 +339,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       return true;
 
     case MSG.TestBackend:
-      handleTestBackend().then(sendResponse);
+      handleTestBackend(msg).then(sendResponse);
       return true;
 
     case MSG.ApplyFill: {
