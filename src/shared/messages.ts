@@ -11,7 +11,7 @@ import type { FieldClassification, FieldMetadata } from "./types.js";
 export const MSG = {
   ScanPage: "formfillm/scan_page",
   Classify: "formfillm/classify",
-  TestOllama: "formfillm/test_ollama",
+  TestBackend: "formfillm/test_backend",
   ApplyFill: "formfillm/apply_fill",
   HighlightField: "formfillm/highlight_field",
   RemoveOverlay: "formfillm/remove_overlay",
@@ -69,8 +69,8 @@ export interface ClassifyRequest {
   fields: FieldMetadata[];
   page: PageContext;
 }
-export interface TestOllamaRequest {
-  type: typeof MSG.TestOllama;
+export interface TestBackendRequest {
+  type: typeof MSG.TestBackend;
 }
 export interface ApplyFillRequest {
   type: typeof MSG.ApplyFill;
@@ -111,7 +111,7 @@ export interface PingRequest {
 export type Message =
   | ScanPageRequest
   | ClassifyRequest
-  | TestOllamaRequest
+  | TestBackendRequest
   | ApplyFillRequest
   | HighlightFieldRequest
   | RemoveOverlayRequest
@@ -134,7 +134,7 @@ export interface ClassifyResponse {
   errors?: string[];
   error?: string;
 }
-export interface TestOllamaResponse {
+export interface TestBackendResponse {
   ok: boolean;
   reachable: boolean;
   /** Installed model ids from the OpenAI-compatible GET /v1/models. */
@@ -178,7 +178,7 @@ export function parseMessage(raw: unknown): Message | null {
   switch (type) {
     case MSG.ScanPage:
       return { type, ...(typeof raw.tabId === "number" ? { tabId: raw.tabId } : {}) };
-    case MSG.TestOllama:
+    case MSG.TestBackend:
       return { type };
     case MSG.Ping:
       return { type };

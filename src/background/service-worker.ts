@@ -26,7 +26,7 @@ import {
   type PasswordContext,
   type PasswordContextResponse,
   type ScanPageResponse,
-  type TestOllamaResponse,
+  type TestBackendResponse,
 } from "../shared/messages.js";
 import {
   CLASSIFICATION_JSON_SCHEMA,
@@ -188,7 +188,7 @@ async function handleClassify(
   return { ok: true, classifications: reconciled, ...(allErrors.length ? { errors: allErrors } : {}) };
 }
 
-async function handleTestOllama(): Promise<TestOllamaResponse> {
+async function handleTestBackend(): Promise<TestBackendResponse> {
   const settings = await getSettings();
   const resolved = resolveBackend(settings);
   if (!resolved.ok) return { ok: false, reachable: false, error: resolved.error };
@@ -334,8 +334,8 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       handleClassify(msg.fields, msg.page).then(sendResponse);
       return true;
 
-    case MSG.TestOllama:
-      handleTestOllama().then(sendResponse);
+    case MSG.TestBackend:
+      handleTestBackend().then(sendResponse);
       return true;
 
     case MSG.ApplyFill: {

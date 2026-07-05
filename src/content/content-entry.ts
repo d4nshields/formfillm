@@ -154,7 +154,7 @@ function init(): void {
         return false;
 
       case MSG.Classify:
-      case MSG.TestOllama:
+      case MSG.TestBackend:
       case MSG.ParsePasswordPolicy:
         // These are background-only messages; the content script ignores them.
         sendResponse({ ok: false, error: "Not handled in content script." });

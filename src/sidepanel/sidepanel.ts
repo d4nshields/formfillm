@@ -18,7 +18,7 @@ import {
   type ParsePasswordPolicyResponse,
   type PasswordContextResponse,
   type ScanPageResponse,
-  type TestOllamaResponse,
+  type TestBackendResponse,
 } from "../shared/messages.js";
 import type { BackendId, FieldClassification, FieldMetadata, LedgerEntry, Profile, Settings } from "../shared/types.js";
 import { PROFILE_KEYS } from "../shared/types.js";
@@ -171,14 +171,15 @@ async function refreshStatus(): Promise<void> {
   const localLine = el("div", { class: "ff-status-line" }, [
     el("span", { class: "ff-badge ff-badge-local", text: "Local-only" }),
   ]);
+  const backendLabel = (BACKEND_PROFILES[settings.backend] ?? BACKEND_PROFILES.ollama).label;
   const ollamaLine = el("div", { class: "ff-status-line" }, [
-    el("span", { class: "ff-status-key", text: "Ollama:" }),
+    el("span", { class: "ff-status-key", text: `${backendLabel}:` }),
     el("span", { class: "ff-status-ollama", text: " checking…" }),
   ]);
   root.append(ollamaLine, modelLine, localLine);
 
-  const res = await sendBg<TestOllamaResponse>({ type: MSG.TestOllama }).catch(
-    () => ({ ok: false, reachable: false }) as TestOllamaResponse,
+  const res = await sendBg<TestBackendResponse>({ type: MSG.TestBackend }).catch(
+    () => ({ ok: false, reachable: false }) as TestBackendResponse,
   );
   const span = ollamaLine.querySelector(".ff-status-ollama") as HTMLElement;
   if (res.reachable) {
@@ -1089,9 +1090,9 @@ async function renderSettingsView(root: HTMLElement): Promise<void> {
     clear(testResult);
     const label = currentProfile().label;
     showBusy(`Testing the ${label} connection…`, "Querying available models.");
-    let res: TestOllamaResponse;
+    let res: TestBackendResponse;
     try {
-      res = await sendBg<TestOllamaResponse>({ type: MSG.TestOllama });
+      res = await sendBg<TestBackendResponse>({ type: MSG.TestBackend });
     } finally {
       hideBusy();
     }
