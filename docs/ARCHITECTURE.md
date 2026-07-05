@@ -76,7 +76,8 @@ formfillm is a Manifest V3 Chrome extension split into three runtime contexts pl
 - `messages.ts` — discriminated-union message contracts + `parseMessage` boundary validator.
 - `ollama-policy.ts` — `validateOllamaUrl`, `validateModelName` (cloud rejection), `assessModel` (8 GB-VRAM size guidance).
 - `sensitivity.ts` — category→sensitivity floor, `reconcileClassification` (fail-closed, secrets → `never_fill`).
-- `classification-schema.ts` — JSON schema for Ollama + `validateClassificationResponse` (one entry per field, fail-closed) + `extractJson`.
+- `classification-schema.ts` — JSON schema + `validateClassificationResponse` (one entry per field, fail-closed) + `extractJson` (repairs unclosed/truncated model JSON).
+- `inference/` — the model-server seam (ports & adapters): `port.ts` (`ChatBackend`), `openai-adapter.ts` (the one OpenAI `/v1` HTTP adapter, fetch-only + unit-tested), `profiles.ts` (per-backend deltas: default URL + thinking-off, for Ollama/SGLang/vLLM/llama.cpp).
 - `profile-keys.ts` — category → local profile key resolution (returns null for unsafe categories).
 - `ledger.ts` — `buildLedgerEntry` (+ `redactLedgerEntry` defensive pass).
 - `sanitize.ts` — field-metadata sanitization (caps, control-char stripping, fixed key set).
@@ -84,7 +85,7 @@ formfillm is a Manifest V3 Chrome extension split into three runtime contexts pl
 - `password.ts` — CSPRNG password generator, policy normalization, and LLM policy-extraction merge. Pure/testable.
 
 ### Background (`src/background/service-worker.ts`)
-Side-panel wiring, message routing, local model-server client speaking the OpenAI-compatible `/v1/chat/completions` (timeout, 403 guidance, schema-then-JSON retry, `reasoning_effort:"none"` to disable thinking), policy enforcement. Holds no profile data.
+Side-panel wiring, message routing, policy enforcement. Builds a `ChatBackend` (via `resolveBackend`) from `settings.backend` + base URL and calls the port — the OpenAI `/v1` adapter (`src/shared/inference/`) does the HTTP, timeouts, 403 guidance, schema-then-JSON retry, and per-backend thinking-off. Holds no profile data.
 
 ### Content (`src/content/`)
 - `scanner.ts` — DOM → `FieldMetadata[]` + an in-page registry mapping `fieldId` → element refs (refs never leave the page).
@@ -126,9 +127,9 @@ All cross-context messages are discriminated unions keyed on `type` (`src/shared
 
 Static files (`manifest.json`, `sidepanel.html`, `sidepanel.css`, `icons/`) are copied verbatim. No plugins, no remote fetches at build time — deliberately minimal and auditable.
 
-## Scaling the LLM backend (future)
+## Swapping the LLM backend
 
-The inference call is funneled through a single `chatCompletion()` seam that speaks the OpenAI-compatible `POST /v1/chat/completions` wire format, so a future centralized GPU server (llama.cpp / vLLM / SGLang) is a **URL change, not a code change**. `validateOllamaUrl` allows any local port for exactly this reason (host stays localhost-only; the manifest CSP `connect-src` + `host_permissions` cover loopback on any port, so no rebuild is needed to switch backends). See [docs/PLAN-backend-abstraction.md](./PLAN-backend-abstraction.md) for the implemented design and [docs/SCALING-LLM.md](./SCALING-LLM.md) for the concurrency analysis, engine tiers, and local-only caveats.
+Inference goes through the `ChatBackend` **port** (`src/shared/inference/`), implemented by one OpenAI-compatible `/v1` **adapter** and parameterized by a **backend profile** (`profiles.ts`). Because Ollama, SGLang, vLLM and llama.cpp all speak `/v1`, they aren't separate adapters — they're profiles (default URL + how to disable "thinking"), chosen in **Settings → Backend**. So switching is **config, not code**: `validateOllamaUrl` and the manifest CSP/`host_permissions` both allow any loopback port, so no rebuild is needed. Per-backend setup is documented individually in [docs/backends/](./backends/); the *why* (concurrency, hardware path) is in [docs/SCALING-LLM.md](./SCALING-LLM.md), and the original design note in [docs/PLAN-backend-abstraction.md](./PLAN-backend-abstraction.md).
 
 ## Reference use
 
