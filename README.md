@@ -31,14 +31,14 @@ If you have more VRAM, **larger, higher-performing models are fully usable** and
 
 | GPU VRAM | Suggested model | Notes |
 |----------|-----------------|-------|
-| ≤ 6 GB | `qwen3.5:2b` | Smallest / fastest fallback. |
+| ≤ 6 GB | `qwen3.5:4b` | Smallest / fastest fallback. |
 | **~8 GB (minimum)** | **`qwen3.5:4b`** | **Default.** Fully on-GPU, fast. |
 | ~12 GB | `qwen3.5:9b` | Higher quality (~8.8 GB; needs >8 GB to stay on-GPU). |
 | 16 GB+ | larger `qwen3.5` variants (14B / 32B…) | Best quality; slower per call. |
 | any | `qwen2.5:7b` | Legacy non-reasoning fallback. |
 
 ```bash
-ollama pull qwen3.5:2b      # smaller / fastest
+ollama pull qwen3.5:4b      # smaller / fastest
 ollama pull qwen3.5:9b      # higher quality, needs >8 GB VRAM
 ollama pull qwen2.5:7b      # legacy fallback
 ```
