@@ -19,7 +19,7 @@ formfillm is a Manifest V3 Chrome extension that helps you fill web forms — bu
 
 ### 1. Install and run Ollama (local)
 
-Install Ollama from <https://ollama.com>, then pull a model.
+Install Ollama from <https://ollama.com>, then pull a model. On macOS and Windows the desktop app **starts the local server automatically** (it runs in the menu bar / system tray) — you do **not** need to run `ollama serve` yourself. On Linux, start it with `ollama serve` (or the systemd service).
 
 **`qwen3.5:4b` is the recommended _minimum_** — pin it when GPU VRAM is limited to ~8 GB. It is the pinned default for reproducibility and fully fits an 8 GB card (e.g. an NVIDIA RTX 4060):
 
@@ -54,14 +54,24 @@ ollama list
 curl http://127.0.0.1:11434/v1/models   # OpenAI-compatible endpoint the extension uses
 ```
 
-**If the extension gets a `403` from Ollama**, allow the extension origin to call it and restart Ollama:
+#### Required: allow the extension to reach Ollama (`OLLAMA_ORIGINS`)
+
+This step is **not optional** — without it the extension gets a `403` on every scan, even though `curl` and **Test Ollama connection** both succeed. By default Ollama only answers requests from localhost origins and rejects the `chrome-extension://…` origin the extension sends. Allowlist it:
 
 ```bash
-# macOS/Linux (current shell)
+# macOS/Linux (current shell — for an `ollama serve` you launch from this shell)
 export OLLAMA_ORIGINS='chrome-extension://*'
+
 # Windows (PowerShell, persistent)
 setx OLLAMA_ORIGINS "chrome-extension://*"
 ```
+
+Then **restart Ollama so the running server picks up the new value** — setting the variable does not affect the process already running:
+
+- **Windows / macOS:** quit the desktop app from the **system tray / menu bar** (right-click the Ollama icon → **Quit** — closing the window is not enough), then relaunch it. `setx` alone will **not** take effect until you do this.
+- **Linux:** restart `ollama serve` (or `systemctl restart ollama`).
+
+A `403` means the request *reached* the server and was refused on origin grounds — it is not a "server not running" error. (A connection error, by contrast, means the server isn't up.)
 
 formfillm only ever talks to a **local** server — `127.0.0.1` or `localhost` on any port (default `11434`). Remote and cloud hosts are always rejected (by both the URL policy and the manifest CSP).
 
